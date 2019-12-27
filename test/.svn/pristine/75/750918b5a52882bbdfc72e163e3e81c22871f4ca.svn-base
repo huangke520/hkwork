@@ -1,0 +1,326 @@
+<?php
+
+namespace app\api\controller;
+
+use app\api\model\ydxq\SupplierTask as SupplierTaskModel;
+use app\api\model\ydxq\Orders as OrdersModel;
+use app\api\model\ydxq\BbBaseCoupon as BbBaseCouponModel;
+
+class Task extends BaseController {
+
+    private $supplier_task_model;
+    private $order_model;
+    private $bb_base_coupon_model;
+
+    private $gold = ['one_gold','two_gold'];
+
+    public function __construct() {
+        parent::__construct();
+        $this->supplier_task_model = new SupplierTaskModel();
+        $this->order_model = new OrdersModel();
+        $this->bb_base_coupon_model = new BbBaseCouponModel();
+
+        $this->gold = [
+            'one_gold'  =>  get_task_gold(2),
+            'two_gold'  =>  get_task_gold(3),
+        ];
+    }
+
+    //获取金币领取进度
+    public function gold_rate(){
+        $param = $this->request_param;
+
+        $is_time = time();
+
+        //获取今天是周几 0-周天  1-周一  2-周二 3-周三 4-周四 5-周五 6-周六
+        $is_week = date("w", $is_time);
+
+        if(!isset($param['openid']) || empty($param['openid'])){
+            sdk_return('', 0, '参数openid缺失');
+        }
+        $openid = $param['openid'];
+
+        $monday = $this->getMondayAndSundayTime()['monday'];//获取当前时间周，周一的时间戳
+
+        //获取当前用户的本周订单金币记录
+        $where = [
+            ['create_time', '>', $monday],
+            ['openid', '=', $openid]
+        ];
+
+        //判断是否为支付后的请求
+        if(isset($param['orderid']) && !empty($param['orderid'])){
+            //获取到订单信息
+            $order_where = [
+                ['id', '=', $param['orderid']]
+            ];
+            $order_info = $this->order_model->getInfo($order_where);
+
+            if(empty($order_info)){
+                sdk_return('', 0, '获取订单详情错误');
+            }
+
+            //获取到当前订单所在周的周一到周天的时间戳
+            $order_day = $this->getMondayAndSundayTime($order_info['createtime']);
+            $order_monday =  $order_day['monday'];//当前订单时间所在周周一时间戳
+            $order_sunday = $order_day['sunday'];//当前订单时间所在周周天时间戳
+
+            //验证订单是否为本周订单
+            if($is_time > $order_monday && $is_time < $order_sunday){
+                $is_week_order = 1;
+            }
+
+            //重置where查询条件
+            $where = [
+                ['create_time', '>', $order_monday],
+                ['create_time', '<', $order_sunday],
+                ['openid', '=', $openid]
+            ];
+
+        }
+        //获取最新的列表
+        $task_info = $this->supplier_task_model->getInfo($where);
+
+        $msg_num = $this->supplier_task_model->getTaskMsgNum($openid, $task_info['id']);//获取未领取的数量
+
+        //获取第一次领取和第二次领取的优惠券
+        $coupon = $this->getDrawCoupon();
+
+        $return_data = [
+            'one_gold'      =>  $this->gold['one_gold'],
+            'two_gold'      =>  $this->gold['two_gold'],
+            'one_coupons'   =>  $coupon['one_coupons'],
+            'two_coupons'   =>  $coupon['two_coupons'],
+            'one_coupon_ids'=>  $coupon['one_coupon_ids'],
+            'two_coupon_ids'=>  $coupon['two_coupon_ids'],
+            'day1_pay'      =>  0,
+            'day2_pay'      =>  0,
+            'day3_pay'      =>  0,
+            'day1_draw'     =>  0,
+            'day2_draw'     =>  0,
+            'day3_draw'     =>  0,
+            'msg_num'       =>  empty($msg_num) ? 0 : $msg_num
+        ];
+
+        $content = [
+            'str1'      =>  '每自然周2天下单，获赠3000金币或满减优惠券2张；3天下单再获赠6000金币或满减优惠券2张，赶快参与吧！'
+        ];
+
+        if(empty($task_info)){
+            $return_data = array_merge($return_data, $content);
+            sdk_return($return_data, 1, '获取成功');
+        }
+
+        $return_data['task_id'] = $task_info['id'];//当前任务的id
+
+        //下单一次
+        if($task_info['week_day_count'] == 1){
+            $return_data['day1_pay'] = 1;//第一天修改为支付状态
+            //今天为周天
+            if($is_week == 0){
+                $content = [
+                    'str1'      =>  '本周累计下单1天，未满足好礼领取条件,下周将重新计算下单天数，请及时下单领取！',
+                ];
+            }else{//今天为非周天
+                $content = [
+                    'str1'      =>  '本周已累计下单1天，再下单1天即可享受好礼优惠,下周将重新计算下单天数，请及时下单领取！'
+                ];
+            }
+
+            //如果不是本周订单
+            if(isset($param['orderid']) && !isset($is_week_order)){
+                $content = [
+                    'str1'      =>  '上周累计下单1天，未满足好礼领取条件,本周将重新计算下单天数，请及时下单领取！',
+                ];
+            }
+        }
+
+        //下单两次
+        if($task_info['week_day_count'] == 2){
+            $return_data['day1_pay'] = $return_data['day2_pay'] = 1;//第一天和第二天修改为支付状态
+            //今天为周天
+            if($is_week == 0){
+                $content = [
+                    'str1'      =>  '本周累计下单2天，无双倍领取好礼机会，下周将重新计算下单天数，请注意活动进度及时下单领取！'
+                ];
+            }else{//今天为非周天
+                $content = [
+                    'str1'      =>  '本周已累计下单2天达到领取标准，再下单1天双倍领取，下周将重新计算下单天数，请注意活动进度及时下单领取！',
+                ];
+            }
+
+            //如果不是本周订单
+            if(isset($param['orderid'])  && !isset($is_week_order)){
+                $content = [
+                    'str1'      =>  '上周累计下单2天，无双倍领取好礼机会，本周将重新计算下单天数，请注意活动进度及时下单领取！'
+                ];
+            }
+        }
+
+        //下单三次及以上
+        if($task_info['week_day_count'] >= 3){
+            $return_data['day1_pay'] = $return_data['day2_pay'] =  $return_data['day3_pay'] = 1;//全部修改为已支付状态
+            $content = [
+                'str1'      =>  '本周累计下单'.$task_info['week_day_count'].'天，已获取全部好礼奖励,下周将重新计算下单天数，邀您继续参与活动！'
+            ];
+
+            //如果是订单只调用
+            if(isset($param['orderid']) && !isset($is_week_order)){
+                $content = [
+                    'str1'      =>  '上周累计下单'.$task_info['week_day_count'].'天，已获取全部好礼奖励,本周将重新计算下单天数，邀您继续参与活动！'
+                ];
+            }
+        }
+
+        //获取领取状态
+        if($task_info['gift2'] > 0){
+            $return_data['day2_draw'] = 1;//第二天已领取
+            $return_data['day2_draw_type'] = $task_info['gift2_type'];//第二天领取类型
+        }
+
+        //获取领取状态
+        if($task_info['gift3'] > 0){
+            $return_data['day3_draw'] = 1;//第三天已领取
+            $return_data['day3_draw_type'] = $task_info['gift3_type'];//第三天领取类型
+        }
+
+        $return_data = array_merge($return_data, $content);
+        sdk_return($return_data, 1, '获取成功');
+
+    }
+
+    //活动金币列表
+    public function gold_rate_lists(){
+        $param = $this->request_param;
+        if(!isset($param['openid']) || empty($param['openid'])){
+            sdk_return('', 0, '缺少参数openid');
+        }
+        $openid = $param['openid'];
+
+        $page = isset($param['page']) && !empty(intval($param['page'])) ?  intval($param['page']) : 1;
+        $page_num = isset($param['page_num']) && !empty(intval($param['page_num'])) ?  intval($param['page_num']) : 10;
+        $limit = [($page - 1) * $page_num, $page_num];
+        //获取当前用户的所有的历史记录
+        $gold_lists = $this->supplier_task_model->getGoldRateLists($openid, $limit);
+
+        //获取第一次领取和第二次领取的优惠券
+        $coupon = $this->getDrawCoupon();
+
+        $return_data = [
+            'one_gold'      =>  $this->gold['one_gold'],
+            'two_gold'      =>  $this->gold['two_gold'],
+            'one_coupons'   =>  $coupon['one_coupons'],
+            'two_coupons'   =>  $coupon['two_coupons'],
+            'one_coupon_ids'=>  $coupon['one_coupon_ids'],
+            'two_coupon_ids'=>  $coupon['two_coupon_ids'],
+        ];
+        $lists = [];
+        foreach ($gold_lists as $k => $v){
+            $week_day = $this->getMondayAndSundayTime($v['create_time']);
+            $data = [
+                'task_id'       =>  $v['id'],
+                'day1_pay'      =>  0,
+                'day2_pay'      =>  0,
+                'day3_pay'      =>  0,
+                'day1_draw'     =>  0,
+                'day2_draw'     =>  0,
+                'day3_draw'     =>  0,
+                'start_time'    =>  date('Y.m.d', $week_day['monday']),
+                'end_time'      =>  date('Y.m.d', $week_day['sunday']),
+            ];
+
+            $content = '暂无可领取金币~~';
+            //下单一次
+            if($v['week_day_count'] == 1){
+                $data['day1_pay'] = 1;//第二天修改为支付状态
+                $data['img'] = 'https://oss.yundian168.com/ydxq/img/system/xcx/img/bac20191024/bac1.png';
+            }
+            //下单两次
+            if($v['week_day_count'] == 2){
+                $data['day1_pay'] = $data['day2_pay'] = 1;//第二天修改为支付状态
+                $data['img'] = 'https://oss.yundian168.com/ydxq/img/system/xcx/img/bac20191024/bac2.png';
+                if($v['gift2'] == 0){
+                    $content = '您有1份好礼待领取！';
+                }
+            }
+            //下单三次及以上
+            if($v['week_day_count'] >= 3){
+                $data['day1_pay'] = $data['day2_pay'] = $data['day3_pay'] = 1;//第三天修改为支付状态
+                $data['img'] = 'https://oss.yundian168.com/ydxq/img/system/xcx/img/bac20191024/bac3.png';
+
+                if($v['gift2'] == 0 && $v['gift3'] == 0){
+                    $content = '您有2份好礼待领取，请及时领取！';
+                }else if($v['gift2'] == 0 || $v['gift3'] == 0){
+                    $content = '您有1份好礼待领取！';
+                }
+            }
+
+            $data['content'] = $content;
+
+            //获取领取状态
+            if($v['gift2'] > 0){
+                $data['day2_draw'] = 1;//第二天已领取
+                $return_data['day2_draw_type'] = $v['gift2_type'];//第二天领取类型
+            }
+
+            //获取领取状态
+            if($v['gift3'] > 0){
+                $data['day3_draw'] = 1;//第三天已领取
+                $return_data['day3_draw_type'] = $v['gift3_type'];//第三天领取类型
+            }
+
+            $lists[] = $data;
+        }
+
+        $return_data['lists'] = $lists;
+
+        sdk_return($return_data, 1, '获取成功');
+    }
+
+    //获取当前时间所在周 周一和周天的时间戳
+    public function getMondayAndSundayTime($time = 0){
+        $time = empty($time) ? time() : $time;
+        //获取周一的时间
+        $monday = $time - ((date('w', $time) == 0 ? 7 : date('w', $time)) - 1) * 24 * 3600;//当前时间的周一时间戳
+        $sunday_times = $time + (7 - (date('w', $time) == 0 ? 7 : date('w', $time))) * 24 * 3600;//当前订单时间所在周周天时间戳
+        $sunday = strtotime('+1 day', strtotime(date('Y-m-d', $sunday_times))) - 100;
+        return [
+            'monday'        =>  strtotime(date('Y-m-d', $monday)),
+            'sunday'        =>  $sunday
+        ];
+    }
+
+    //获取领取的优惠券信息
+    public function getDrawCoupon(){
+        $one_coupons = $this->bb_base_coupon_model->getInfoPro([['c_type', '=', 2], ['status', '=', 1]],['id','limit_money','money_value','valid_day'],['id'=>'desc']);
+        $two_coupons = $this->bb_base_coupon_model->getInfoPro([['c_type', '=', 3], ['status', '=', 1]],['id','limit_money','money_value','valid_day'],['id'=>'desc']);
+        $one_coupons['num'] = 2;
+        $one_coupons['money_value'] = intval($one_coupons['money_value']);
+        $one_coupons['valid_date'] = date("Y-m-d", time() + $one_coupons['valid_day'] * 24 * 3600);
+
+        $two_coupons['num'] = 2;
+        $two_coupons['money_value'] = intval($two_coupons['money_value']);
+        $two_coupons['valid_date'] = date("Y-m-d", time() + $two_coupons['valid_day'] * 24 * 3600);
+
+        $one_coupons_arr[] = $one_coupons;
+        $two_coupons_arr[] = $two_coupons;
+
+        return [
+            'one_coupons'       =>  $one_coupons_arr,
+            'two_coupons'       =>  $two_coupons_arr,
+            'one_coupon_ids'    =>  $this->getCouponIds($one_coupons_arr),
+            'two_coupon_ids'    =>  $this->getCouponIds($two_coupons_arr),
+        ];
+    }
+
+    public function getCouponIds($arr = []){
+        $tmp = [];
+        foreach ($arr as $k => $v){
+            $tmp[] = [
+                'id'        =>  $v['id'],
+                'num'       =>  $v['num']
+            ];
+        }
+        return json_encode($tmp);
+    }
+}

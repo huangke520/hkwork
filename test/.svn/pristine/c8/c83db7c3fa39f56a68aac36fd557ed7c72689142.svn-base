@@ -1,0 +1,880 @@
+<?php
+/**
+ * 分词类
+ * 基于字典的中英文数字混合分词算法RMM实现
+ * https://blog.csdn.net/xqhadoop/article/details/60757242
+ *
+ * seaboyer@163.com
+ *
+ * 2019-10-09
+ */
+
+namespace splitWord;
+
+class splitWord
+{
+    //字典
+    private $dict = [];
+
+    //========== 分词类外部方法 ============//
+
+    /**
+     * 对外方法：数组组合为字典
+     * @param $data_list
+     * @param string $key
+     * @return array
+     */
+    public function get_dict($data_list, $key = 'key_word')
+    {
+        $dict = array();
+        foreach ($data_list as $one) {
+            $dict[] = $one[$key];
+        }
+        return $dict;
+    }
+
+    /**
+     * 对外方法：处理字典
+     * 根据公司现有的业务逻辑：有包含关系的词根abc，ab程序默认为abc，现需要为ab
+     * @param $dict
+     * @return array
+     */
+    public function fix_dict($dict)
+    {
+        $dict_old = $dict;
+        foreach ($dict as $k => $v) {
+            foreach ($dict_old as $kk => $vv) {
+                if ($vv != $v && stripos($vv, $v) !== false) {
+                    unset($dict_old[$kk]);
+                }
+            }
+        }
+
+        $dict = array_values($dict_old);
+        return $dict;
+    }
+
+    /**
+     * 对外方法：加载字典
+     * @param $dict
+     */
+    function set_dict($dict)
+    {
+        //词典大写，方便比对
+        if (!empty($dict)) {
+            foreach ($dict as $i => $v) {
+                $dict[$i] = strtoupper($v);
+            }
+        }
+        $this->dict = $dict;
+    }
+
+    /**
+     * 对外方法：字符串拆词，返回数组
+     * @param $vStr
+     * @param int $is_fix_dict
+     * @param int $is_replace
+     * @return array
+     */
+    public function split_word($vStr, $is_fix_dict = 1, $is_replace = 1)
+    {
+        $arr = array();
+        if (!empty($vStr)) {
+            $arr = $this->split_word_v2($vStr, $is_fix_dict, $is_replace);
+        }
+        return $arr;
+    }
+
+    //========== 分词类内部方法 ============//
+
+    /**
+     * 拆词方法具体实现
+     * 根据已有词典拆词为数组方法
+     * @param $vStr
+     * @param int $is_fix_dict
+     * @param int $is_replace
+     * @return array
+     */
+    private function split_word_v2($vStr, $is_fix_dict = 1, $is_replace = 1)
+    {
+        if ('' === $vStr) {
+            return [];
+        }
+
+        if (empty($this->dict)) {
+            exit('词典为空');
+        } else {
+            if ($is_fix_dict) {
+                $this->dict = $this->fix_dict($this->dict);
+            }
+        }
+
+        //大写，方便比对
+        $str = strtoupper($vStr);
+
+        //替换调一些特殊符号()[]（）等等
+        if ($is_replace) {
+            $arr_seach = array('(', ')', '[', ']', '（', '）');
+            $arr_replace = array('', '', '', '', '', '');
+            $str = str_replace($arr_seach, $arr_replace, $str);
+        }
+
+        //分词初步结果
+        $result = [];
+        while ('' !== $str) {
+            $pos = 0;
+            $t_str = $str;
+            while (1) {
+                if (in_array($t_str, $this->dict)) {
+                    $result[] = $t_str;
+                    $t_str = '';
+                } else {
+                    $pos++;
+                    $t_str = mb_substr($str, $pos);
+                    if (1 == mb_strlen($t_str)) {
+                        $result[] = $t_str;
+                        $t_str = '';
+                    }
+                }
+                if ('' === $t_str) {
+                    break;
+                }
+            }
+            if (0 == $pos) {
+                break;
+            }
+            $str = mb_substr($str, 0, $pos);
+
+            if (1 == $pos && '' !== trim($str)) {
+                $result[] = $str;
+                break;
+            }
+        }
+
+        $result = array_reverse($result);
+        $result_merge_num = [];
+        //连续单个数字或字母同类型合并
+        $last_num = '';
+        //连续字符类型
+        $last_c_type = '';
+        foreach ($result as $word) {
+            if (1 == mb_strlen($word)) {
+                //单个字
+                $c_type = 3;    //汉字
+                if ($word >= 'A' && $word <= 'Z') {
+                    $c_type = 1;    //字母
+                } elseif (is_numeric($word)) {
+                    $c_type = 2;    //数字
+                } elseif (in_array($word, ['+', '-', '*', '/', '.', '%'])) {
+                    $c_type = 2;    //数字或字母，随着前面一个而变
+                } else {
+                    $c_type = 0; //其他，例如空格等
+                }
+                //以下是数字或字母
+                if ($c_type == $last_c_type) {
+                    //与之前的是同类的
+                    $last_num .= $word;
+                } else {
+                    //不同类的
+                    if ('' !== $last_num) {
+                        $result_merge_num[] = $last_num;
+                    }
+                    $last_num = $word;
+                    $last_c_type = $c_type;
+                }
+                continue;
+            }
+            //以下是多个字的词
+            if ('' !== $last_num) {
+                //如果之前有连续的数值，则合并为一个，加入数组
+                $result_merge_num[] = $last_num;
+                $last_num = '';
+            }
+            $result_merge_num[] = $word;
+        }
+
+        if ('' !== $last_num) {
+            $result_merge_num[] = $last_num;
+        }
+
+        //滤除空格，注意不能用array_filter，否则把0值会去掉
+        foreach ($result_merge_num as $k => $word) {
+            $result_merge_num[$k] = trim($word);
+            if ('' === $word) {
+                unset($result_merge_num[$k]);
+            }
+            if('味' == $word && $k > 1){
+                $result_merge_num[$k-1] = $result_merge_num[$k-1].'味';
+                unset($result_merge_num[$k]);
+            }
+            if('面' == $word && $k > 1){
+                $result_merge_num[$k-1] = $result_merge_num[$k-1].'面';
+                unset($result_merge_num[$k]);
+            }
+        }
+        return array_values($result_merge_num);
+    }
+
+    /**
+     * 分词原始的方法
+     * 基于字典的中英文数字混合分词算法RMM 实现
+     */
+    private function rmmseg($vStr)
+    {
+        if ('' === $vStr) {
+            return [];
+        }
+
+        if (empty($this->dict)) {
+            exit('词典为空');
+        }
+
+        //大写，方便比对
+        $str = strtoupper($vStr);
+
+        //分词初步结果
+        $result = [];
+
+        while ('' !== $str) {
+
+            $pos = 0;
+            $t_str = $str;
+            while (1) {
+//                echo '$t_str=' . $t_str . '，$pos=' . $pos . '<br>';
+                if (in_array($t_str, $this->dict)) {
+                    $result[] = $t_str;
+//                    echo '    在字典中:' . $t_str . '<br>';
+                    $t_str = '';
+                } else {
+                    $pos++;
+                    $t_str = mb_substr($str, $pos);
+//                    echo '     不在字典,剩余 ' . $t_str . '<br>';
+                    if (1 == mb_strlen($t_str)) {
+                        $result[] = $t_str;
+                        $t_str = '';
+                    }
+                }
+
+                if ('' === $t_str) {
+                    break;
+                }
+            }
+
+            if (0 == $pos) {
+                break;
+            }
+
+            $str = mb_substr($str, 0, $pos);
+            if (1 == $pos && '' !== trim($str)) {
+                $result[] = $str;
+                break;
+            }
+
+//            echo '循环str=' . $str . print_r($result, 1) . '<br>';
+        }
+
+        $result = array_reverse($result);
+//        echo '<pre>' . print_r($result, 1);
+
+        $result_merge_num = [];
+
+        //连续单个数字或字母同类型合并
+        $last_num = '';
+        //连续字符类型
+        $last_c_type = '';
+
+        foreach ($result as $word) {
+//            echo print_r($result_merge_num, 1) . '<br><br>$word=' . $word . ' &nbsp;&nbsp;';
+            if (1 == mb_strlen($word)) {
+                //单个字
+
+                $c_type = 3;    //汉字
+                if ($word >= 'A' && $word <= 'Z') {
+                    $c_type = 1;    //字母
+                } elseif (is_numeric($word)) {
+                    $c_type = 2;    //数字
+                } elseif (in_array($word, ['+', '-', '*', '/', '.', '%'])) {
+                    $c_type = 2;    //数字或字母，随着前面一个而变
+                } else {
+                    $c_type = 0; //其他，例如空格等
+                }
+
+                //以下是数字或字母
+                if ($c_type == $last_c_type) {
+                    //与之前的是同类的
+                    $last_num .= $word;
+
+                } else {
+                    //不同类的
+                    if ('' !== $last_num) {
+                        $result_merge_num[] = $last_num;
+                    }
+
+                    $last_num = $word;
+                    $last_c_type = $c_type;
+                }
+
+//                echo 'c_type=' . $c_type . ',last=' . $last_num . '<br>';
+                continue;
+            }
+
+            //以下是多个字的词
+            if ('' !== $last_num) {
+                //如果之前有连续的数值，则合并为一个，加入数组
+                $result_merge_num[] = $last_num;
+                $last_num = '';
+            }
+
+            $result_merge_num[] = $word;
+
+//            echo 'c_type=' . $c_type . print_r($result_merge_num, 1) . '<br>';
+        }
+
+//        echo '<pre> 1 $result_merge_num=' . print_r($result_merge_num, 1);
+
+        if ('' !== $last_num) {
+            $result_merge_num[] = $last_num;
+        }
+
+        //滤除空格，注意不能用array_filter，否则把0值会去掉
+        foreach ($result_merge_num as $i => $word) {
+            if (' ' === $word) {
+                unset($result_merge_num[$i]);
+            }
+        }
+
+//        echo '<pre> $result_merge_num=' . print_r($result_merge_num, 1);
+        return $result_merge_num;
+    }
+
+    private function str_rev_gb($str)
+    {
+        //判断输入的是不是utf8类型的字符，否则退出
+        if (!is_string($str) || !mb_check_encoding($str, 'UTF-8')) {
+            exit("输入类型不是UTF8类型的字符串");
+        }
+        $array = array();
+        //将字符串存入数组
+        $l = mb_strlen($str, 'UTF-8');
+        //在mb_strlen计算时，选定内码为UTF8，则会将一个中文字符当作长度1来计算
+
+        for ($i = 0; $i < $l; $i++) {
+            $array[] = mb_substr($str, $i, 1, 'UTF-8');
+        }
+        //反转字符串
+        krsort($array);
+        //拼接字符串
+        $string = implode($array);
+        return $string;
+    }
+
+    private function split_word_pro($vStr)
+    {
+        if ('' === $vStr) {
+            return [];
+        }
+
+        if (empty($this->dict)) {
+            exit('词典为空');
+        }
+
+        //大写，方便比对
+        $str = strtoupper($vStr);
+        $str = $this->str_rev_gb($str);
+
+        //分词初步结果
+        $result = [];
+        while ('' !== $str) {
+            echo "ab<br>";
+            $k = 1;
+            $pos = 0;
+            $t_str = $str;
+            while (1) {
+                echo $pos . ": " . $t_str . "<br>";
+                if (in_array($this->str_rev_gb($t_str), $this->dict)) {
+                    $result[] = $this->str_rev_gb($t_str);
+                    $t_str = '';
+                } else {
+                    $pos++;
+                    $t_str = mb_substr($str, $pos, $k);
+                    echo $t_str . "<br>";
+                    if (1 == mb_strlen($t_str)) {
+                        $result[] = $this->str_rev_gb($t_str);
+                        $t_str = '';
+                    }
+                }
+                if ('' === $t_str) {
+                    break;
+                }
+                $k++;
+            }
+            if ($k > mb_strlen($str)) {
+                break;
+            }
+//
+//            if (0 == $pos) {
+//                break;
+//            }
+            $str = mb_substr($str, 0, $pos);
+
+            if (1 == $pos && '' !== trim($str)) {
+                echo "in " . $str . "<br>";
+                $result[] = $str;
+                break;
+            }
+        }
+        echo "<br>";
+        print_r($result);
+        exit;
+        $result = array_reverse($result);
+        $result_merge_num = [];
+        //连续单个数字或字母同类型合并
+        $last_num = '';
+        //连续字符类型
+        $last_c_type = '';
+        foreach ($result as $word) {
+            if (1 == mb_strlen($word)) {
+                //单个字
+                $c_type = 3;    //汉字
+                if ($word >= 'A' && $word <= 'Z') {
+                    $c_type = 1;    //字母
+                } elseif (is_numeric($word)) {
+                    $c_type = 2;    //数字
+                } elseif (in_array($word, ['+', '-', '*', '/', '.', '%'])) {
+                    $c_type = 2;    //数字或字母，随着前面一个而变
+                } else {
+                    $c_type = 0; //其他，例如空格等
+                }
+                //以下是数字或字母
+                if ($c_type == $last_c_type) {
+                    //与之前的是同类的
+                    $last_num .= $word;
+                } else {
+                    //不同类的
+                    if ('' !== $last_num) {
+                        $result_merge_num[] = $last_num;
+                    }
+                    $last_num = $word;
+                    $last_c_type = $c_type;
+                }
+                continue;
+            }
+            //以下是多个字的词
+            if ('' !== $last_num) {
+                //如果之前有连续的数值，则合并为一个，加入数组
+                $result_merge_num[] = $last_num;
+                $last_num = '';
+            }
+            $result_merge_num[] = $word;
+        }
+        if ('' !== $last_num) {
+            $result_merge_num[] = $last_num;
+        }
+        //滤除空格，注意不能用array_filter，否则把0值会去掉
+        foreach ($result_merge_num as $i => $word) {
+            if (' ' === $word) {
+                unset($result_merge_num[$i]);
+            }
+//            $result_merge_num[$i] = str_replace('（','',$result_merge_num[$i]);
+//            $result_merge_num[$i] = str_replace('(','',$result_merge_num[$i]);
+//            $result_merge_num[$i] = str_replace(')','',$result_merge_num[$i]);
+//            $result_merge_num[$i] = str_replace('）','',$result_merge_num[$i]);
+//            $result_merge_num[$i] = str_replace('[','',$result_merge_num[$i]);
+//            $result_merge_num[$i] = str_replace(']','',$result_merge_num[$i]);
+        }
+        return $result_merge_num;
+    }
+
+    private function split_word_v0($vStr)
+    {
+        if ('' === $vStr) {
+            return [];
+        }
+
+        if (empty($this->dict)) {
+            exit('词典为空');
+        }
+
+        //大写，方便比对
+        $str = strtoupper($vStr);
+
+        //分词初步结果
+        $result = [];
+        while ('' !== $str) {
+            echo "ab<br>";
+            $pos = 0;
+            $t_str = $str;
+            while (1) {
+                if (in_array($t_str, $this->dict)) {
+                    $result[] = $t_str;
+                    $t_str = '';
+                } else {
+                    $pos++;
+                    $t_str = mb_substr($str, $pos);
+                    if (1 == mb_strlen($t_str)) {
+                        $result[] = $t_str;
+                        $t_str = '';
+                    }
+                }
+                if ('' === $t_str) {
+                    break;
+                }
+            }
+            if (0 == $pos) {
+                break;
+            }
+            $str = mb_substr($str, 0, $pos);
+
+            if (1 == $pos && '' !== trim($str)) {
+                $result[] = $str;
+                break;
+            }
+        }
+
+        $result = array_reverse($result);
+        $result_merge_num = [];
+        //连续单个数字或字母同类型合并
+        $last_num = '';
+        //连续字符类型
+        $last_c_type = '';
+        foreach ($result as $word) {
+            if (1 == mb_strlen($word)) {
+                //单个字
+                $c_type = 3;    //汉字
+                if ($word >= 'A' && $word <= 'Z') {
+                    $c_type = 1;    //字母
+                } elseif (is_numeric($word)) {
+                    $c_type = 2;    //数字
+                } elseif (in_array($word, ['+', '-', '*', '/', '.', '%'])) {
+                    $c_type = 2;    //数字或字母，随着前面一个而变
+                } else {
+                    $c_type = 0; //其他，例如空格等
+                }
+                //以下是数字或字母
+                if ($c_type == $last_c_type) {
+                    //与之前的是同类的
+                    $last_num .= $word;
+                } else {
+                    //不同类的
+                    if ('' !== $last_num) {
+                        $result_merge_num[] = $last_num;
+                    }
+                    $last_num = $word;
+                    $last_c_type = $c_type;
+                }
+                continue;
+            }
+            //以下是多个字的词
+            if ('' !== $last_num) {
+                //如果之前有连续的数值，则合并为一个，加入数组
+                $result_merge_num[] = $last_num;
+                $last_num = '';
+            }
+            $result_merge_num[] = $word;
+        }
+        if ('' !== $last_num) {
+            $result_merge_num[] = $last_num;
+        }
+        //滤除空格，注意不能用array_filter，否则把0值会去掉
+        foreach ($result_merge_num as $i => $word) {
+            if (' ' === $word) {
+                unset($result_merge_num[$i]);
+            }
+        }
+        return $result_merge_num;
+    }
+
+    private function split_word_asc($vStr)
+    {
+        if ('' === $vStr) {
+            return [];
+        }
+
+        if (empty($this->dict)) {
+            exit('词典为空');
+        }
+
+        //大写，方便比对
+        $str = strtoupper($vStr);
+
+        //分词初步结果
+        $result = [];
+        while ('' !== $str) {
+            $pos = 0;
+            $t_str = $str;
+            while (1) {
+                if (in_array($t_str, $this->dict)) {
+                    $result[] = $t_str;
+                    $t_str = '';
+                } else {
+                    $pos++;
+                    //$t_str = mb_substr($str, $pos);
+
+                    $t_str = mb_substr($str, 0, $pos);
+                    echo $t_str . "<br>";
+//                    if (1 == mb_strlen($t_str)) {
+                    $result[] = $t_str;
+//                        $t_str = '';
+//                    }
+                }
+                if ($pos >= mb_strlen($str)) {
+                    break;
+                }
+                if ('' === $t_str) {
+                    break;
+                }
+            }
+            if (0 == $pos) {
+                break;
+            }
+            $str = mb_substr($str, 0, $pos);
+            if (1 == $pos && '' !== trim($str)) {
+                $result[] = $str;
+                break;
+            }
+        }
+        $result = array_reverse($result);
+        $result_merge_num = [];
+        //连续单个数字或字母同类型合并
+        $last_num = '';
+        //连续字符类型
+        $last_c_type = '';
+        foreach ($result as $word) {
+            if (1 == mb_strlen($word)) {
+                //单个字
+                $c_type = 3;    //汉字
+                if ($word >= 'A' && $word <= 'Z') {
+                    $c_type = 1;    //字母
+                } elseif (is_numeric($word)) {
+                    $c_type = 2;    //数字
+                } elseif (in_array($word, ['+', '-', '*', '/', '.', '%'])) {
+                    $c_type = 2;    //数字或字母，随着前面一个而变
+                } else {
+                    $c_type = 0; //其他，例如空格等
+                }
+                //以下是数字或字母
+                if ($c_type == $last_c_type) {
+                    //与之前的是同类的
+                    $last_num .= $word;
+                } else {
+                    //不同类的
+                    if ('' !== $last_num) {
+                        $result_merge_num[] = $last_num;
+                    }
+                    $last_num = $word;
+                    $last_c_type = $c_type;
+                }
+                continue;
+            }
+            //以下是多个字的词
+            if ('' !== $last_num) {
+                //如果之前有连续的数值，则合并为一个，加入数组
+                $result_merge_num[] = $last_num;
+                $last_num = '';
+            }
+            $result_merge_num[] = $word;
+        }
+        if ('' !== $last_num) {
+            $result_merge_num[] = $last_num;
+        }
+        //滤除空格，注意不能用array_filter，否则把0值会去掉
+        foreach ($result_merge_num as $i => $word) {
+            if (' ' === $word) {
+                unset($result_merge_num[$i]);
+            }
+//            $result_merge_num[$i] = str_replace('（','',$result_merge_num[$i]);
+//            $result_merge_num[$i] = str_replace('(','',$result_merge_num[$i]);
+//            $result_merge_num[$i] = str_replace(')','',$result_merge_num[$i]);
+//            $result_merge_num[$i] = str_replace('）','',$result_merge_num[$i]);
+//            $result_merge_num[$i] = str_replace('[','',$result_merge_num[$i]);
+//            $result_merge_num[$i] = str_replace(']','',$result_merge_num[$i]);
+        }
+        return $result_merge_num;
+    }
+
+    private function split_word_zt($vStr)
+    {
+        $str_length = mb_strlen($vStr);
+
+        //1.先组合出所有可能词根
+        $arr_one_all1 = array();
+        for ($i = 0; $i < $str_length; $i++) {
+            for ($j = 1; $j <= $str_length - $i; $j++) {
+                $one_str = mb_substr($vStr, $i, $j);
+                $arr_one_all1[] = $one_str;
+            }
+            echo "<hr>";
+        }
+        echo "<br>1";
+        print_r($arr_one_all1);
+
+        //2.根据词根长度，同长度排一起
+        $arr_one_all2 = array();
+        foreach ($arr_one_all1 as $one) {
+            $str_length = mb_strlen($one);
+            $arr_one_all2[$str_length][] = $one;
+        }
+        echo "<br>2";
+        print_r($arr_one_all2);
+
+        //3.同长度的词根，再按照字母排序
+        $arr_one_all3 = array();
+        foreach ($arr_one_all2 as &$one) {
+            //print_r($one);
+            sort($one);
+
+            //asort($one);
+
+//            //将中文字符转换成gbk编码,必须先将数组转换为字符串，然后转换编码，最后将字符串反转成数组
+//            $sta = eval('return '.mb_convert_encoding(var_export($one,true), "gbk","utf-8").";");
+//            //按数组值进行排序
+//            sort($sta);
+//            //将中文字符转换成utf-8编码
+//            $sta = eval('return '.mb_convert_encoding(var_export($sta,true), "utf-8", "gbk").";");
+            //print_r($one);
+            $arr_one_all3[] = $one;
+        }
+        echo "<br>3";
+        print_r($arr_one_all3);
+
+        //4.长度和字母排序后，将所有词根再次组合一起
+        $arr_one_all4 = array();
+        foreach ($arr_one_all3 as $one) {
+            foreach ($one as $two) {
+                $arr_one_all4[] = $two;
+            }
+        }
+        echo "<br>4";
+        print_r($arr_one_all4);
+    }
+
+    private function split_word_v1($vStr)
+    {
+        if ('' === $vStr) {
+            return [];
+        }
+
+        if (empty($this->dict)) {
+            exit('词典为空');
+        }
+
+        //大写，方便比对
+        $str = strtoupper($vStr);
+
+        //分词初步结果
+        $result = [];
+
+        while ('' !== $str) {
+
+            $pos = 0;
+            $t_str = $str;
+            while (1) {
+//                echo '$t_str=' . $t_str . '，$pos=' . $pos . '<br>';
+                if (in_array($t_str, $this->dict)) {
+                    $result[] = $t_str;
+//                    echo '    在字典中:' . $t_str . '<br>';
+                    $t_str = '';
+                } else {
+                    $pos++;
+                    $t_str = mb_substr($str, $pos);
+//                    echo '     不在字典,剩余 ' . $t_str . '<br>';
+                    if (1 == mb_strlen($t_str)) {
+                        $result[] = $t_str;
+                        $t_str = '';
+                    }
+                }
+
+                if ('' === $t_str) {
+                    break;
+                }
+            }
+
+            if (0 == $pos) {
+                break;
+            }
+
+            $str = mb_substr($str, 0, $pos);
+            if (1 == $pos && '' !== trim($str)) {
+                $result[] = $str;
+                break;
+            }
+
+//            echo '循环str=' . $str . print_r($result, 1) . '<br>';
+        }
+
+        $result = array_reverse($result);
+//        echo '<pre>' . print_r($result, 1);
+
+        $result_merge_num = [];
+
+        //连续单个数字或字母同类型合并
+        $last_num = '';
+        //连续字符类型
+        $last_c_type = '';
+
+        foreach ($result as $word) {
+//            echo print_r($result_merge_num, 1) . '<br><br>$word=' . $word . ' &nbsp;&nbsp;';
+            if (1 == mb_strlen($word)) {
+                //单个字
+
+                $c_type = 3;    //汉字
+                if ($word >= 'A' && $word <= 'Z') {
+                    $c_type = 1;    //字母
+                } elseif (is_numeric($word)) {
+                    $c_type = 2;    //数字
+                } elseif (in_array($word, ['+', '-', '*', '/', '.', '%'])) {
+                    $c_type = 2;    //数字或字母，随着前面一个而变
+                } else {
+                    $c_type = 0; //其他，例如空格等
+                }
+
+                //以下是数字或字母
+                if ($c_type == $last_c_type) {
+                    //与之前的是同类的
+                    $last_num .= $word;
+
+                } else {
+                    //不同类的
+                    if ('' !== $last_num) {
+                        $result_merge_num[] = $last_num;
+                    }
+
+                    $last_num = $word;
+                    $last_c_type = $c_type;
+                }
+
+//                echo 'c_type=' . $c_type . ',last=' . $last_num . '<br>';
+                continue;
+            }
+
+            //以下是多个字的词
+            if ('' !== $last_num) {
+                //如果之前有连续的数值，则合并为一个，加入数组
+                $result_merge_num[] = $last_num;
+                $last_num = '';
+            }
+
+            $result_merge_num[] = $word;
+
+//            echo 'c_type=' . $c_type . print_r($result_merge_num, 1) . '<br>';
+        }
+
+//        echo '<pre> 1 $result_merge_num=' . print_r($result_merge_num, 1);
+
+        if ('' !== $last_num) {
+            $result_merge_num[] = $last_num;
+        }
+
+        //滤除空格，注意不能用array_filter，否则把0值会去掉
+        foreach ($result_merge_num as $i => $word) {
+            if (' ' === $word) {
+                unset($result_merge_num[$i]);
+            }
+        }
+
+//        echo '<pre> $result_merge_num=' . print_r($result_merge_num, 1);
+        return $result_merge_num;
+    }
+}
+
+?>

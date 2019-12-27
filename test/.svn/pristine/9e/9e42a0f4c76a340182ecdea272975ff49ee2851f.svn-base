@@ -1,0 +1,88 @@
+<?php
+/**
+ * ceadr 2019-11-04
+ */
+
+namespace app\api\controller;
+//跨域设置
+header("Access-Control-Allow-Origin: *");
+header("Access-Control-Allow-Methods: POST, GET");
+
+use think\Db;
+
+class AfterSale extends BaseController {
+    public function __construct() {
+        parent::__construct();
+    }
+
+    /**
+     * 获取售后类型和客服电话
+     * auth:maic
+     */
+    public function afterSaleType() {
+//        1：货发错了，2：货发少了，3：货品质量问题，9：其他
+        $return_data = [
+            'type' => [
+                1 => '货发错了',
+                2 => '货发少了',
+                3 => '货品质量问题',
+                9 => '其他',
+            ],
+            'service_tel' => '11234567891',
+        ];
+        sdk_return($return_data, 1, 'success');
+    }
+
+    /**
+     * 提交售后反馈
+     * auth:maic
+     */
+    public function submitAfterSale(){
+        $param = $this->request->param();
+        $type = !empty($param['type']) ? $param['type'] : sdk_return('',6,'参数错误');//反馈类型
+        $order_id = !empty($param['order_id']) ? $param['order_id'] : sdk_return('',6,'参数错误');//订单ID
+        $user_openid = !empty($param['user_openid']) ? $param['user_openid'] : sdk_return('',6,'参数错误');//提交用户openID
+        $user_openid = is_sns($user_openid);
+        $description = !empty($param['description']) ? $param['description'] : sdk_return('',6,'参数错误');//售后问题描述
+        $img = !empty($param['img']) ? $param['img'] : sdk_return('',6,'参数错误');//售后图片
+        $sale_insert_data = [
+            'open_id' => $user_openid,
+            'order_id' => $order_id,
+            'type' => $type,
+            'description' => $description,
+            'img' => $img,
+            'status' => 1,
+            'create_time' => time(),
+        ];
+        $res = Db::connect('db_mini_mall')->table('ims_ewei_shop_order_after_sale')->insertGetId($sale_insert_data);
+        if(!empty($res)){
+            $order_update['after_sale_id'] = $res;
+            Db::connect('db_mini_mall')->table('ims_ewei_shop_order')->where('id = '.$order_id)->update($order_update);
+            sdk_return('',1,'success');
+        }else{
+            sdk_return('',6,'反馈失败，请稍后重试');
+        }
+    }
+
+    /**
+     * 获取售后反馈详情
+     * auth:maic
+     */
+    public function getAfterSale(){
+        $param = $this->request->param();
+        $after_sale_id = !empty($param['after_sale_id']) ? $param['after_sale_id'] : sdk_return('',6,'参数错误');//售后反馈ID
+        $after_sale_data = Db::connect('db_mini_mall')->table('ims_ewei_shop_order_after_sale')->where('id = '.$after_sale_id)->find();
+        if(!empty($after_sale_data)){
+            $return_data = [
+                'type' => $after_sale_data['type'],
+                'description' => $after_sale_data['description'],
+                'img' => $after_sale_data['img'],
+                'status' => $after_sale_data['status'],
+            ];
+            sdk_return($return_data,1,'success');
+        }else{
+            sdk_return('',6,'未找到售后反馈信息');
+        }
+    }
+}
+?>

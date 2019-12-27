@@ -1,0 +1,120 @@
+<?php
+
+/**
+ * Author: seaboyer@163.com
+ * Date: 2019-08-08
+ */
+
+namespace app\api\controller;
+
+use app\api\model\ydxq\BbBaseCoupon as BbBaseCouponModel;
+use app\api\model\ydxq\ShopMemberCoupon as ShopMemberCouponModel;
+use think\Db;
+
+class ActivityCode extends BaseController {
+
+    private $bb_base_coupon_model;
+    private $shop_member_coupon_model;
+    public function __construct() {
+        parent::__construct();
+        $this->bb_base_coupon_model = new BbBaseCouponModel();
+        $this->shop_member_coupon_model = new ShopMemberCouponModel();
+    }
+
+    /**
+     * 领取活动二维码优惠券
+     */
+    public function getActivityCodeCoupon() {
+        $param = $this->request->param();
+        sys_log($param);
+        $user_openid = !empty($param['user_openid']) ? $param['user_openid'] : sdk_return('', 6, '参数缺失');//用户openID
+        $coupon_id = !empty($param['coupon_id']) ? $param['coupon_id'] : sdk_return('', 6, '参数缺失');//优惠券ID
+        $qr_code = !empty($param['qr_code']) ? $param['qr_code'] : sdk_return('', 6, '参数缺失');//优惠券唯一码
+        $sup_id = !empty($param['sup_id']) ? $param['sup_id'] : 461;//店铺ID，默认461
+        $user_openid = is_sns($user_openid);
+        $now_time = time();
+        //查询当前唯一码是否已经被使用
+        $is_use = Db::connect('db_mini_mall')->table('ims_ewei_shop_member_coupon')->where('coupon_code = '.$qr_code)->count();
+        if(!empty($is_use)){
+            sdk_return('',6,'当前二维码已失效');
+        }
+        unset($is_use);
+        //查询当前用户是否已经扫码领取过优惠券
+//        $is_use = Db::connect('db_mini_mall')->table('ims_ewei_shop_member_coupon')->where('openid = "'.$user_openid.'" and coupon_status < 7')->count();
+//        if(!empty($is_use)){
+//            sdk_return('',6,'您已领取过优惠券');
+//        }
+//        unset($is_use);
+        //计算当前优惠券的截止时间
+
+        $coupon_data = $this->bb_base_coupon_model->getInfo(['id'=>$coupon_id]);
+        if(empty($coupon_data)){
+            sdk_return('',6,'未查询到优惠券信息');
+        }
+        if($coupon_data['valid_type'] == 2){
+            //判断是否到期
+            if(time() >= $coupon_data['valid_date']){
+                sdk_return('',6,'当前二维码已失效');
+            }
+            //固定日期失效
+            $time_end = $coupon_data['valid_date'];
+            $valid_day_count = floor(($coupon_data['valid_date'] - time()) / (60 * 60 * 24));
+            if($valid_day_count < 2){
+                $valid_day_count = 0;
+            }
+        }else{
+            $valid_day = !empty($coupon_data['valid_day']) ? $coupon_data['valid_day'] : 1;
+            $time_end = $now_time + ((60 * 60 * 24) * $valid_day);
+            //到期天数
+            $valid_day_count = $coupon_data['valid_day'];
+        }
+        //优惠券数量
+        $insert_member_coupon = [
+            'coupon_id' => $coupon_id,//周活动领取优惠券
+            'openid' => $user_openid,
+            'openid_time' => $now_time,
+            'time_start' => $now_time,
+            'time_end' => $time_end,
+            'create_time' => $now_time,
+            'coupon_status' => 2,
+            'coupon_code' => $qr_code,
+            'status' => 1,
+        ];
+        $new_member_coupon_id = Db::connect('db_mini_mall')->table('ims_ewei_shop_member_coupon')->insertGetId($insert_member_coupon);
+        // 插入到当天未支付订单优惠中
+        $start_time = strtotime(date('Y-m-d',$now_time));
+        $user_order = Db::connect('db_mini_mall')->table('ims_ewei_shop_order')->where('coupon_id = 0 and (status = 0 or status = 2) and createtime > '.$start_time.' and supplier_id = '.$sup_id)->order('createtime','desc')->field('id,price,goodsprice,coupon_id,coupon_money')->find();
+        $msg_type = 0;//普通弹层
+        $old_price = 0;
+        $new_price = 0;
+        $order_id = 0;
+        if(!empty($user_order)){
+            //插入
+            $old_price = $user_order['price'];
+            $new_price = $user_order['price'] - $coupon_data['money_value'];
+            $order_id = $user_order['id'];
+            Db::connect('db_mini_mall')->table('ims_ewei_shop_order')->where('id = '.$user_order['id'])->update(['price'=>$new_price,'goodsprice'=>$new_price,'coupon_id'=>$new_member_coupon_id,'coupon_money'=>$coupon_data['money_value']]);
+            Db::connect('db_mini_mall')->table('ims_ewei_shop_member_coupon')->where('id = '.$new_member_coupon_id)->update(['order_id'=>$user_order['id'],'order_time'=>$now_time,'coupon_status'=>3]);
+            $msg_type = 1;//直接修改订单金额的弹层
+        }
+//        sdk_return(['content' => $content],1,'领取成功');
+        $limit_money = !empty($coupon_data['limit_money']) ? $coupon_data['limit_money'] : 0;
+        $limit_money_msg = '满'.$limit_money.'可用';
+        $end_time_msg = date('Y-m-d',$time_end).'到期（'.$valid_day_count.'天）';
+        $data = [
+            'title' => '全品类通用优惠券',
+            'money_value' => !empty($coupon_data['money_value']) ? $coupon_data['money_value'] : 0,
+            'limit_money_msg' => $limit_money_msg,
+            'msg1' => '店铺活动',
+            'msg2' => '奖励赠送',
+            'end_time_msg' => $end_time_msg,
+            'msg_type' => $msg_type,
+            'old_price' => $old_price,//原价
+            'new_price' => $new_price,//券后价
+            'coupon_msg' => '优惠券使用成功，待支付订单价原价'.$old_price.'元，券后价'.$new_price.'元',//券后价
+            'order_id' => $order_id,
+        ];
+        sys_log($data);
+        sdk_return($data,1,'领取成功');
+    }
+}

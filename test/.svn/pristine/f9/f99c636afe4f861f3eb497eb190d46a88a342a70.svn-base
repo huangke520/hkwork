@@ -1,0 +1,1511 @@
+<?php
+// +----------------------------------------------------------------------
+// | ThinkPHP [ WE CAN DO IT JUST THINK ]
+// +----------------------------------------------------------------------
+// | Copyright (c) 2006-2016 http://thinkphp.cn All rights reserved.
+// +----------------------------------------------------------------------
+// | Licensed ( http://www.apache.org/licenses/LICENSE-2.0 )
+// +----------------------------------------------------------------------
+// | Author: seaboyer@163.com
+// +----------------------------------------------------------------------
+
+// 应用公共文件
+
+//use DES\QbDES;
+//use DES\CryptDes;
+//use think\cache\driver\Memcache;  //不使用tp5的Memcache
+//use think\cache\driver\Redis;     //不使用tp5的Redis
+use db\RedisCluster;
+
+
+/**
+ * @cc 获取客户端IP地址
+ * @param integer $type 返回类型 0 返回IP地址 1 返回IPV4地址数字
+ * @return mixed
+ *
+ * @author seaboyer@163.com
+ * @date 2018-09-03
+ * @version 1.0
+ */
+if (!function_exists('get_client_ip')) {
+    function get_client_ip($type = 0)
+    {
+        $type = $type ? 1 : 0;
+        static $ip = NULL;
+        if ($ip !== NULL) return $ip[$type];
+        if (isset($_SERVER['HTTP_X_FORWARDED_FOR'])) {
+            $arr = explode(',', $_SERVER['HTTP_X_FORWARDED_FOR']);
+            $pos = array_search('unknown', $arr);
+            if (false !== $pos) unset($arr[$pos]);
+            $ip = trim($arr[0]);
+        } elseif (isset($_SERVER['HTTP_CLIENT_IP'])) {
+            $ip = $_SERVER['HTTP_CLIENT_IP'];
+        } elseif (isset($_SERVER['REMOTE_ADDR'])) {
+            $ip = $_SERVER['REMOTE_ADDR'];
+        }
+        // IP地址合法验证
+        $long = sprintf("%u", ip2long($ip));//ip2long值太大，db把int(11)改为bigint(20)
+        //$long = ip2long($ip);
+        $ip = $long ? array($ip, $long) : array('0.0.0.0', 0);
+        return $ip[$type];
+    }
+}
+
+/**
+ * @cc 参数过滤
+ * @param string
+ * @return string
+ *
+ * @author seaboyer@163.com
+ * @date 2018-09-03
+ * @version 1.0
+ */
+if (!function_exists('strip_sql')) {
+    function strip_sql($str)
+    {
+        $search = array("/union[\s|\t]/i", "/select[\s|\t]/i", "/update[\s|\t]/i", "/outfile[\s|\t]/i", "/ascii/i", "/[\s|\t]or[\s|\t]/i", "/\/\*/i");
+        $replace = array('union&nbsp;', 'select', 'update;', 'outfile&nbsp;', 'ascii&nbsp;', '&nbsp;or&nbsp;', '');
+        return is_array($str) ? array_map('strip_sql', $str) : preg_replace($search, $replace, $str);
+    }
+}
+
+/**
+ * @cc 获取时间戳
+ * @param string 空或者2018-08-23
+ * @return integer
+ *
+ * @author seaboyer@163.com
+ * @date 2018-09-03
+ * @version 1.0
+ */
+if (!function_exists('get_time')) {
+    function get_time($time = null)
+    {
+        if (!empty($time)) {
+            return strtotime($time);
+        } else {
+            return time();
+        }
+    }
+}
+
+/**
+ * @cc 加密传输值
+ * @param $data mixed
+ * @param $status int
+ * @param $msg string
+ * @return string
+ *
+ * @author seaboyer@163.com
+ * @date 2018-09-07
+ * @version 1.0
+ */
+if (!function_exists('sdk_return')) {
+    function sdk_return($data, $status = 1, $msg = '')
+    {
+        $sdk_data = array();
+        $sdk_data['time'] = get_time();
+        $sdk_data['status'] = $status;
+        $sdk_data['msg'] = $msg;
+        if (!empty($data)) {
+            //$data = sdk_encrypt($data);
+        }
+        $sdk_data['res_data'] = $data;
+        $js_data = json_encode($sdk_data);
+
+        echo $js_data;
+        //return $js_data;
+        exit;
+    }
+}
+
+/**
+ * @cc APP加密传输值
+ * @param mixed
+ * @return string
+ *
+ * @author seaboyer@163.com
+ * @date 2018-09-03
+ * @version 1.0
+ */
+if (!function_exists('sdk_encrypt')) {
+    function sdk_encrypt($data)
+    {
+        $data_fix = $data;
+        if (is_array($data) || is_object($data)) {
+            $data_fix = json_encode($data);
+        }
+        $qb_des = new QbDES();//CryptDes();
+        $data_encrypt = $qb_des->encrypt($data_fix);//正式算法
+        $js_data = $data_encrypt;
+
+        return $js_data;
+    }
+}
+
+/**
+ * @cc APP解密传输值
+ * @param string $data
+ * @return mixed
+ *
+ * @author seaboyer@163.com
+ * @date 2018-09-03
+ * @version 1.0
+ */
+if (!function_exists('sdk_decrypt')) {
+    function sdk_decrypt($data)
+    {
+        $qb_des = new QbDES();//CryptDes();
+        $data_fix = $data;
+        $data_decrypt = $qb_des->decrypt($data_fix);//正式算法
+        $js_data = null;
+        if (!empty($data_decrypt)) {
+            $js_data = json_decode($data_decrypt, true);
+        }
+        return $js_data;
+    }
+}
+
+/**
+ * @cc 加密传输值
+ * @param $data mixed
+ * @param $status int
+ * @param $msg string
+ * @return string
+ *
+ * @author seaboyer@163.com
+ * @date 2018-09-07
+ * @version 1.0
+ */
+if (!function_exists('web_return')) {
+    function web_return($auth, $data, $status = 1, $msg = '')
+    {
+        $sdk_data = array();
+        $sdk_data['time'] = get_time();
+        $sdk_data['status'] = $status;
+        $sdk_data['msg'] = $msg;
+        if (!empty($data)) {
+            $data = web_encrypt($data, $auth);
+        }
+        $sdk_data['res_data'] = $data;
+        $js_data = json_encode($sdk_data);
+
+        echo $js_data;
+        //return $js_data;
+        exit;
+    }
+}
+
+/**
+ * @cc WEB加密传输值
+ * @param mixed
+ * @return string
+ *
+ * @author seaboyer@163.com
+ * @date 2018-09-03
+ * @version 1.0
+ */
+if (!function_exists('web_encrypt')) {
+    function web_encrypt($data, $auth = '')
+    {
+        $data_fix = $data;
+        if (is_array($data) || is_object($data)) {
+            $data_fix = json_encode($data);
+        }
+        $qb_des = new QbDES();//CryptDes();
+        if (!empty($auth)) {
+            $str_key = substr($auth, 0, 8);
+            $qb_des->setKey($str_key);
+        }
+        $data_encrypt = $qb_des->encrypt($data_fix);//正式算法
+        $js_data = $data_encrypt;
+
+        return $js_data;
+    }
+}
+
+/**
+ * @cc WEB解密传输值
+ * @param string $data
+ * @return mixed
+ *
+ * @author seaboyer@163.com
+ * @date 2018-09-10
+ * @version 1.0
+ */
+if (!function_exists('web_decrypt')) {
+    function web_decrypt($data, $auth = '')
+    {
+        $qb_des = new QbDES();//CryptDes();
+        $data_fix = $data;
+        if (!empty($auth)) {
+            $str_key = substr($auth, 0, 8);
+            $qb_des->setKey($str_key);
+        }
+        $data_decrypt = $qb_des->decrypt($data_fix);//正式算法
+        $js_data = null;
+        if (!empty($data_decrypt)) {
+            $js_data = json_decode($data_decrypt, true);
+        }
+        return $js_data;
+    }
+}
+
+
+/**
+ * @cc 中文字符串分割的函数
+ * @param string $str
+ * @param number $split_length
+ * @return mixed:string
+ *
+ * @author seaboyer@163.com
+ * @date 2018-09-03
+ * @version 1.0
+ */
+if (!function_exists('mb_str_split')) {
+    function mb_str_split($str, $split_length = 1, $charset = "UTF-8")
+    {
+        if (func_num_args() == 1) {
+            return preg_split('/(?<!^)(?!$)/u', $str);
+        }
+        if ($split_length < 1) return false;
+        $len = mb_strlen($str, $charset);
+        $arr = array();
+        for ($i = 0; $i < $len; $i += $split_length) {
+            $s = mb_substr($str, $i, $split_length, $charset);
+            $arr[] = $s;
+        }
+        return $arr;
+    }
+}
+
+
+/*
+ * 中英文字符串截取
+ */
+//mb_substr($str,0,mb_strlen($str,'utf-8'),'utf-8');
+
+/*
+ * 替换回车，兼容不同操作系统
+ */
+//$str = str_replace(PHP_EOL, '', $str);
+
+
+/**
+ * @cc 定义全局时间信息
+ *
+ * @param null
+ * @return array
+ *
+ * @author seaboyer@163.com
+ * @date 2018-09-03
+ * @version 1.0
+ */
+if (!function_exists('get_const_time')) {
+    function get_const_time()
+    {
+        $time['m1'] = 60;
+        $time['m5'] = 60 * 5;
+        $time['m10'] = 60 * 10;
+        $time['m15'] = 60 * 15;
+        $time['m30'] = 60 * 30;
+        $time['h1'] = 60 * 60;
+        $time['h2'] = 60 * 60 * 2;
+        $time['h6'] = 60 * 60 * 6;
+        $time['h12'] = 60 * 60 * 12;
+        $time['d1'] = 60 * 60 * 24;
+        $time['d7'] = 60 * 60 * 24 * 7;
+        $time['d15'] = 60 * 60 * 24 * 15;
+        return $time;
+    }
+}
+
+/**
+ * @cc 获取全局信息
+ *
+ * @param null
+ * @return array
+ *
+ * @author seaboyer@163.com
+ * @date 2018-09-03
+ * @version 1.0
+ */
+if (!function_exists('get_global_data')) {
+    function get_global_data($key_str)
+    {
+        $r_data = null;
+        if (!empty($key_str)) {
+            $expire_time = 60 * 60 * 24 * 1;
+            $str_key = 'global_' . $key_str;
+            $memcache = get_memcache();
+            $mem_data = $memcache->get($str_key);
+            if (!empty($mem_data)) {
+                $r_data = $mem_data;
+            } else {
+                $arr_list = array();
+                if ($str_key == 'global_api_list') {
+                    $arr_api_list = array();
+                    //include_once 'interface_declare.php';
+                    $arr_api_list = config('api.api_list');
+                    if (is_array($arr_api_list)) {
+                        foreach ($arr_api_list as $one) {
+                            $arr_list[] = get_interface_one($one);
+                        }
+                    }
+                } elseif ($str_key == 'global_expire_time') {
+                    $arr_list = get_const_time();
+                } else {
+                    $arr_list = null;
+                }
+                $r_data = $arr_list;
+                $memcache->set($str_key, $r_data, false, $expire_time);
+            }
+        }
+        return $r_data;
+    }
+}
+
+/**
+ * @cc 组合单个接口的数据(第一次批量初始化的函数)
+ * @cc data包含内容action,$path,$server=1,$type = 2,$info=array(),$param=array()
+ *
+ * @author seaboyer@163.com
+ * @date 2018-09-03
+ * @version 1.0
+ */
+if (!function_exists('get_interface_one')) {
+    function get_interface_one($data)
+    {
+        $arr = array();
+        //$action = 'member_third_login';
+        $arr['action'] = $data[1];     //$action 接口action;
+        $arr['path'] = $data[2];     //$path 路径'member/member.php';
+        $arr['server'] = $data[3];     //$server 从1开始
+        $arr['type'] = $data[4];     //$type 1：不加密，2：加密
+        $arr['info'] = null;         //$info 预留字段
+        $arr['param'] = null;         //$param 开发校验时核对用(time,uid,auth,lat,lng)，发布时为null
+        $arr['index'] = $data[7];     //action_order 接口序号
+        return $arr;
+    }
+}
+
+/**
+ * @cc 根据常规表名返回数据库真实表名(前缀和分表的拼接)
+ *
+ * @access global
+ * @param string $table_name
+ * @param int $uid
+ * @param string $date
+ * @return string
+ *
+ * @author seaboyer@163.com
+ * @date 2018-09-03
+ * @version 1.0
+ */
+if (!function_exists('get_db_table_name')) {
+    function get_db_table_name($table_name, $uid = 0, $date = '')
+    {
+        if (empty($table_name)) {
+            return $table_name;
+        }
+
+        $default_tb_pre = 'b_'; //__PREFIX__;//$CFG['tb_pre'];//config('prefix');
+
+        if (empty($uid)) {
+            $db_table_name = $default_tb_pre . $table_name;
+            return $db_table_name;
+        } else {
+            $default_split = '_';
+            $default_uid_pre = 'u';
+            $default_date_pre = 'm';
+            $default_time = get_time();
+            $db_u_str = $default_uid_pre . get_uid_end_num($uid);
+            if (empty($date)) {
+                $date = date('Y-m-d', $default_time);
+            }
+            if (is_numeric($date)) {
+                $date = date('Y-m-d', $date);
+            }
+            $db_m_str = $default_date_pre . date('ym', strtotime($date));
+
+            switch ($table_name) {
+                case 'w_invite':
+                case 'w_my_ad':
+                case 'w_my_record':
+                    $db_table_name = $default_tb_pre . $table_name . $default_split . $db_m_str . $default_split . $db_u_str;
+                    break;
+                case 'adv_show':
+                case '1_adv_show':
+                case 'w_fix_log':
+                case 'w_api':
+                    $db_table_name = $default_tb_pre . $table_name . $default_split . $db_m_str;
+                    break;
+                //case 'millions_friend'://因只有新人扫码才写入此表，数量不会太大，暂时不分表20180919
+                case 'millions_task':
+                    $db_table_name = $default_tb_pre . $table_name . $default_split . $db_u_str;
+                    break;
+                case 'game_prize':                              //游戏 用户奖品表
+                    $db_table_name = $default_tb_pre . $table_name . $default_split . $db_u_str;
+                    break;
+                case 'game_redpacket':                          //游戏 用户红包表
+                    $db_table_name = $default_tb_pre . $table_name . $default_split . $db_u_str;
+                    break;
+                default :
+                    $db_table_name = $default_tb_pre . $table_name . $default_split . $db_m_str . $default_split . $db_u_str;
+            }
+            return $db_table_name;
+        }
+    }
+}
+
+
+/**
+ * @cc 定义全局服务器信息函数
+ *
+ * @param null
+ * @return array
+ *
+ * @author seaboyer@163.com
+ * @date 2018-06-25
+ * @version 1.0
+ */
+if (!function_exists('get_const_server_info')) {
+    function get_const_server_info()
+    {
+        //引入接口说明文件
+        $arr_api_list = array();
+        //include_once 'interface_declare.php';
+        $arr_api_list = config('api.api_list');
+        $server_info = array();
+
+        $server_info['server_avatar'] = config('server_avatar');
+        $server_info['folder_avatar'] = config('folder_avatar');
+        $server_info['bucket_avatar'] = config('bucket_avatar');
+
+        $server_info['server_ad'] = config('server_ad');
+        $server_info['folder_ad'] = config('folder_ad');
+        $server_info['bucket_ad'] = config('bucket_ad');
+
+        $server_info['server_api'] = config('server_api');
+        $server_info['folder_api'] = config('folder_api');
+
+        $arr_list = array();
+        foreach ($arr_api_list as $one) {
+            $arr_list[$one[0]] = get_interface_one($one);
+        }
+        $server_info['list_api'] = $arr_list;
+
+        return $server_info;
+    }
+}
+
+/**
+ * @cc 获取用户编号的末尾数为分表用
+ *
+ * @param int $uid
+ * @return int
+ *
+ * @author seaboyer@163.com
+ * @date 2018-09-03
+ * @version 1.0
+ */
+if (!function_exists('get_uid_end_num')) {
+    function get_uid_end_num($uid)
+    {
+        $uid_end = 0;
+        if (is_numeric($uid)) {
+            //$arr_uid = str_split($uid);
+            //方法1
+            //krsort($arr_uid);
+            //$uid_end = $arr_uid[0];
+
+            //方法2
+            //$uid_end = end($arr_uid);
+
+            //方法3
+            //$uid_end = $uid % 10;
+
+            //方法4
+            $uid_end = substr($uid, -1);
+        }
+        return $uid_end;
+    }
+}
+
+/**
+ * @cc 实例化memcache
+ *
+ * @param int $uid
+ * @return int
+ *
+ * @author seaboyer@163.com
+ * @date 2018-09-07
+ * @version 1.0
+ */
+if (!function_exists('get_memcache')) {
+    function get_memcache($config = [])
+    {
+        $memcache = null;
+        if (empty($config)) {
+            $host = config("memcache_host");
+            $port = config("memcache_port");
+        } else {
+            $host = isset($config["host"]) ? trim($config["host"]) : '';
+            $port = isset($config["port"]) ? intval($config["port"]) : '';
+        }
+
+        //empty($host) ?  '172.17.30.30' : trim($host);
+        empty($port) ? '11211' : intval($port);
+        if (!empty($host)) {
+            $memcache = new Memcache();
+            $memcache->connect($host, $port);
+        }
+
+        return $memcache;
+    }
+}
+
+/**
+ * @cc 实例化redis，tp内置
+ *
+ * @param int $uid
+ * @return int
+ *
+ * @author seaboyer@163.com
+ * @date 2018-09-07
+ * @version 1.0
+ */
+if (!function_exists('get_redis')) {
+    function get_redis($config = [])
+    {
+        $redis = null;
+        if (empty($config)) {
+            $host = config("redis_host");
+            $port = config("redis_port");
+            $pass = config("redis_pass");
+        } else {
+            $host = isset($config["host"]) ? trim($config["host"]) : '';
+            $port = isset($config["port"]) ? intval($config["port"]) : '';
+            $pass = isset($config["pass"]) ? trim($config["pass"]) : '';
+        }
+        //empty($host) ? '192.168.1.181' : trim($host);
+        empty($port) ? '6379' : intval($port);
+        empty($pass) ? '' : trim($pass);
+
+        if (!empty($host)) {
+            $redis = new Redis(['host' => $host, 'port' => $port, 'password' => $pass]);
+        }
+
+        return $redis;
+    }
+}
+
+/**
+ * @cc 实例化redis引入三方类库加强版
+ *
+ * @param int $uid
+ * @return int
+ *
+ * @author seaboyer@163.com
+ * @date 2018-09-07
+ * @version 1.0
+ */
+if (!function_exists('get_redis_pro')) {
+    function get_redis_pro($config = [])
+    {
+        $redis_pro = null;
+        if (empty($config)) {
+            $host = config("redis_host");
+            $port = config("redis_port");
+            $pass = config("redis_pass");
+        } else {
+            $host = isset($config["host"]) ? trim($config["host"]) : '';
+            $port = isset($config["port"]) ? intval($config["port"]) : '';
+            $pass = isset($config["pass"]) ? trim($config["pass"]) : '';
+        }
+        empty($port) ? '6379' : intval($port);
+        empty($pass) ? '' : trim($pass);
+
+        if (!empty($host)) {
+            $redis_RedisCluster = new RedisCluster();
+            $redis_RedisCluster->connect(['host' => $host, 'port' => $port, 'password' => $pass]);
+            $redis_pro = $redis_RedisCluster->getRedis();
+        }
+
+        return $redis_pro;
+    }
+}
+
+/**
+ * @cc 判断是否是经过base64加密
+ *
+ * @param string $str
+ * @return bool
+ *
+ * @author seaboyer@163.com
+ * @date 2018-09-07
+ * @version 1.0
+ *
+ * 字符串只可能包含A-Z，a-z，0-9，+，/，=字符
+ * 字符串长度是4的倍数
+ * =只会出现在字符串最后，可能没有或者一个等号或者两个等号
+ */
+if (!function_exists('is_sdk_encrypt')) {
+    function is_sdk_encrypt($str)
+    {
+        $is_encrypt = false;
+        if (!empty($str) && is_string($str) && !is_numeric($str)) {
+            //$str = preg_replace('//s*/', '', $str);
+            $str = str_replace(array("\r\n", "\r", "\n", " "), "", $str);
+            $str_len = strlen($str);
+            if ($str_len % 4 == 0 && $str_len >= 4) {
+                /*
+                $i_position = strpos($str,'=');
+                if ($i_position === false) {
+                    $is_encrypt = true;
+                } else {
+                    if ($i_position >= $str_len - 2){
+                        $is_encrypt = true;
+                    }
+                }
+                */
+                //"^[A-Za-z0-9]+$"　　//由数字和26个英文字母组成的字符串
+                if (preg_match('%^[a-zA-Z0-9/+]*={0,2}$%', $str)) {
+                    $is_encrypt = true;
+                }
+            }
+        }
+        return $is_encrypt;
+    }
+}
+
+/**
+ * 定义全局图片类型信息函数
+ *
+ * @param null
+ * @return array
+ *
+ * @author seaboyer@163.com
+ * @date 2018-06-25
+ * @version 1.0
+ */
+if (!function_exists('get_const_image_ext')) {
+    function get_const_image_ext()
+    {
+        $ext_arr = array('', '.gif', '.jpg', '.png');
+        return $ext_arr;
+    }
+}
+
+/**
+ * @cc 获取用户头像
+ *
+ * @param int $uid
+ * @param int $avatar
+ * @param int $type
+ * @return string
+ *
+ * @author seaboyer@163.com （89776730@qq.com 从老代码搬运2018-9-13）
+ * @date 2018-09-07
+ * @version 1.0
+ *
+ */
+if (!function_exists('get_user_avatar')) {
+    function get_user_avatar($uid, $avatar, $type = 1)
+    {
+        //头像类型:1=gif,2=jpg,3=png...
+        $ext_arr = get_const_image_ext(); //array('', '.gif', '.jpg', '.png');
+
+        //--可以根据后缀分配0-9个默认头像图片--//以下代码保留，如需此功能直接去掉注释
+        //$arr_avatar = array();
+        //for($i = 0;$i<10;$i++){
+        //    $arr_avatar[] = md5('u_0_'.$i);
+        //}
+
+        //$avatar_str = 'laijianqian/up_img/weixin/0000/9ba2b207ef7d75bb9099a5435c982578.jpg';
+        $avatar_str = '';//可以设置固定的一个默认头像地址
+
+        if (is_numeric($uid) && $avatar >= 1 && $avatar <= 3) {
+            if ($uid == 1) {//直接拼接系统头像
+                $avatar_str = '0000/9ba2b207ef7d75bb9099a5435c982578.jpg';
+            } elseif ($uid == 6) {//直接拼接小游戏头像
+                $avatar_str = '0000/9ba2b207ef7d75bb9099a5435c982576.jpg';
+            } elseif ($uid == 7) {//直接拼接百万红包头像
+                $avatar_str = '0000/9ba2b207ef7d75bb9099a5435c982577.jpg';
+            } else {
+                $server_str = '';                                  //包括最后的/
+                $uid_num = ceil($uid / 1000) . '/';         //uid除1000向上取整
+                $str_uid = sprintf("%04d", $uid_num);
+                $folder_str = $str_uid . '/';                        //不以/开头，包括最后的/
+                $filename_str = md5('u_' . $uid . '_' . $type); //文件名 md5(u_uid_type)
+                $ext_str = $ext_arr[$avatar];//头像图片类型带.
+                $avatar_str = $server_str . $folder_str . $filename_str . $ext_str;
+            }
+        }
+        return $avatar_str;
+    }
+}
+
+/**
+ * 获取广告图片详细地址
+ *
+ * @param int $uid
+ * @param int $img
+ * @param int $time
+ * @param int $type
+ * @return string
+ *
+ * @author seaboyer@163.com
+ * @date 2018-09-17
+ * @version 1.0
+ */
+if (!function_exists('get_ad_img')) {
+    function get_ad_img($uid, $img, $time, $type = 1)
+    {
+        if (empty($time)) {
+            $time = get_time();
+        }
+
+        //头像类型:1=gif,2=jpg,3=png...
+        $ext_arr = get_const_image_ext(); //array('', '.gif', '.jpg', '.png');
+
+        $ad_img_str = '';
+        if (is_numeric($uid) && $img >= 1 && $img <= 3) {
+            $server_str = '';                       //包括最后的/
+            $uid_num = date('Ymd', $time);
+            $folder_str = $uid_num . '/';           //不以/开头，包括最后的/
+            $filename_str = md5($uid . '_' . $time . '_' . $type);//文件名md5(uid_time_type)
+            $ext_str = $ext_arr[$img];              //头像图片类型带.
+
+            $ad_img_str = $server_str . $folder_str . $filename_str . $ext_str;
+        }
+        return $ad_img_str;
+    }
+}
+
+/**
+ * @cc 获取指定上下限与位数的小数
+ *
+ * @param int $min 小数上限
+ * @param int $max 小数下限
+ * @param int $digit 小数位数
+ * @return string
+ *
+ * @author JF
+ * @date 2018-09-13
+ * @version 1.0
+ */
+if (!function_exists('get_random_num')) {
+    function get_random_num($min, $max, $digit)
+    {
+        $random_float = $min + mt_rand() / mt_getrandmax() * ($max - $min);
+        $random_float = sprintf('%.' . $digit . 'f', $random_float);
+
+        return $random_float;
+    }
+}
+
+/**
+ * @cc 更新memcache中某个列表(新增一个元素，弹出一个最先进入元素，返回列表元素个数)
+ * @param $key
+ * @param $value
+ * @param int $max
+ * @param int $expire_time
+ * @return int
+ *
+ * @author seaboyer@163.com
+ * @date 2018-09-17
+ * @version 1.0
+ */
+if (!function_exists('update_memcache_list')) {
+    function update_memcache_list($key, $value, $max = 6, $expire_time = 0)
+    {
+        if (empty($expire_time)) {
+            $expire_time = 60 * 60 * 24 * 1;
+        }
+
+        $arr_list = array();
+        $memcache = get_memcache();
+        $mem_list = $memcache->get($key);
+        if (is_array($mem_list)) {
+            $arr_list = $mem_list;
+            $arr_list[] = $value;
+
+            if (count($arr_list) > $max) {
+                array_shift($arr_list);
+            }
+        } else {
+            $arr_list[] = $value;
+        }
+        $memcache->set($key, $arr_list, false, $expire_time);
+        $res_count = count($arr_list);
+        unset($arr_list);
+
+        return $res_count;
+    }
+}
+
+/**
+ * @cc curl_post请求
+ * @param $url
+ * @param string $xml_data
+ * @param bool $cert
+ * @return mixed
+ *
+ * @author seaboyer@163.com
+ * @date 2018-09-21
+ * @version 1.0
+ */
+if (!function_exists('curl_post')) {
+    function curl_post($url, $xml_data = '', $cert = false)
+    {
+        if (extension_loaded('curl')) {
+            $curl = curl_init();
+            curl_setopt($curl, CURLOPT_TIMEOUT, 30);
+            curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($curl, CURLOPT_URL, $url);
+            curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, false);
+            curl_setopt($curl, CURLOPT_SSL_VERIFYHOST, false);
+            curl_setopt($curl, CURLOPT_POST, true);
+            if ($cert) {
+                curl_setopt($curl, CURLOPT_SSLCERTTYPE, 'PEM');
+                curl_setopt($curl, CURLOPT_SSLCERT, WX_API_CERT);
+                curl_setopt($curl, CURLOPT_SSLKEYTYPE, 'PEM');
+                curl_setopt($curl, CURLOPT_SSLKEY, WX_API_KEY);
+            }
+            if ($xml_data) {
+                curl_setopt($curl, CURLOPT_POSTFIELDS, $xml_data);
+            }
+            $res = curl_exec($curl);
+            curl_close($curl);
+        } else {
+            $res = file_get_contents($url);
+        }
+        return $res;
+    }
+}
+
+/**
+ * @cc curl_get请求
+ * @param $url
+ * @param string $xmldata
+ * @param bool $cert
+ * @return mixed
+ *
+ * @author seaboyer@163.com
+ * @date 2018-09-21
+ * @version 1.0
+ */
+if (!function_exists('curl_get')) {
+    function curl_get($url)
+    {
+        if (extension_loaded('curl')) {
+            $curl = curl_init();
+            curl_setopt($curl, CURLOPT_TIMEOUT, 30);
+            curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($curl, CURLOPT_URL, $url);
+            curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, false);
+            curl_setopt($curl, CURLOPT_SSL_VERIFYHOST, false);
+            curl_setopt($curl, CURLOPT_POST, false);
+            $res = curl_exec($curl);
+            curl_close($curl);
+        } else {
+            $res = file_get_contents($url);
+        }
+        return $res;
+    }
+}
+/**
+ * @cc 判断是否为MD5串
+ * @param string $str_pass
+ * @return mixed
+ *
+ * @author seaboyer@163.com
+ * @date 2018-09-21
+ * @version 1.0
+ */
+if (!function_exists('is_md5')) {
+    function is_md5($str_pass)
+    {
+        return preg_match("/^[a-f0-9]{32}$/", $str_pass);
+    }
+}
+
+/**
+ * @cc 后台密码处理
+ * @param string $str_pass
+ * @param string $salt
+ * @return string
+ *
+ * @author seaboyer@163.com
+ * @date 2018-09-21
+ * @version 1.0
+ */
+if (!function_exists('qb_password')) {
+    function qb_password($str_pass, $salt)
+    {
+        return md5((is_md5($str_pass) ? md5($str_pass) : md5(md5($str_pass))) . $salt);
+    }
+}
+
+/**
+ * @cc 判断后台是否登录
+ * @return bool
+ */
+if (!function_exists('admin_is_login')) {
+    function admin_is_login()
+    {
+        $session_admin = session('admin_info');
+        return !empty($session_admin);
+    }
+}
+
+/**
+ * @cc 随机红包，返回其中一个
+ * @return bool
+ *
+ * @author seaboyer@163.com
+ * @date 2018-09-21
+ * @version 1.0
+ */
+if (!function_exists('get_rand')) {
+    function get_rand($list)
+    {
+        $i_max = 1;
+        $arr1 = null;
+        $arr2 = null;
+        foreach ($list as $one) {
+            $arr1['id'] = $one['id'];
+            $arr1['mix'] = $i_max;
+            $i_max = $i_max + $one['c_radio'];
+            $arr1['max'] = $i_max;
+            $arr2[] = $arr1;
+        }
+        $i_rand = mt_rand(1, $i_max);
+        $id = 0;
+        foreach ($arr2 as $one) {
+            if ($one['min'] <= $i_rand && $one['max'] >= $i_rand) {
+                $id = $one['id'];
+                break;
+            }
+        }
+        return $id;
+    }
+}
+
+/**
+ * redis队列(list+set)初始化
+ *
+ * @param $str_key
+ * @param $count
+ * @return int
+ *
+ * @author seaboyer@163.com
+ * @date 2018-09-21
+ * @version 1.0
+ */
+if (!function_exists('redis_queue_init')) {
+    function redis_queue_init($str_key, $count)
+    {
+        $r = 0;
+        try {
+            $str_key = trim($str_key);
+            $count = intval($count);
+            $redis = get_redis_pro();
+            if ($redis->lLen("g_list_" . $str_key) <= 0) {
+                //往全局列表list里推送数据
+                for ($i = 1; $i <= $count; $i++) {
+                    $redis->rPush($str_key, $i);
+                }
+                $r = $redis->lLen("g_list_" . $str_key);
+                //清空对应set集合的数据
+//                $r_set = $redis->sMembers("g_set_" . $str_key);
+//                foreach ($r_set as $one) {
+//                    $redis->sRem("g_set_" . $str_key, $one);
+//                }
+                if ($redis->exists("g_set_" . $str_key)) {
+                    $redis->del("g_set_" . $str_key);
+                }
+            }
+        } catch (Exception $e) {
+            $r = -1;
+            echo $e->getMessage();
+        }
+        return $r;
+    }
+}
+
+/**
+ * @cc redis队列(list+set)读取
+ *
+ * @param $str_key
+ * @param $uid
+ * @return int
+ *
+ * @author seaboyer@163.com
+ * @date 2018-09-21
+ * @version 1.0
+ */
+if (!function_exists('redis_queue_get')) {
+    function redis_queue_get($str_key, $uid)
+    {
+        $r = 0;
+        try {
+            $str_key = trim($str_key);
+            $uid = intval($uid);
+            $redis = get_redis_pro();
+            $redis_value = $redis->lPop("g_list_" . $str_key);
+            if (!empty($redis_str)) {
+                //保存uid到set集合
+                $r_add = $redis->sAdd("g_set_" . $str_key, $redis_value . ':' . $uid);
+                //如果保存失败，回滚list的值
+                if (!empty($r_add)) {
+                    $redis->rPush('g_list_' . $str_key, $redis_value);
+                } else {
+                    $r = $redis_value;
+                }
+            }
+        } catch (Exception $e) {
+            $r = -1;
+            echo $e->getMessage();
+        }
+        return $r;
+    }
+}
+
+/**
+ * @cc redis队列(list+set)删除
+ *
+ * @param $str_key
+ * @return int
+ *
+ * @author seaboyer@163.com
+ * @date 2018-09-21
+ * @version 1.0
+ */
+if (!function_exists('redis_queue_del')) {
+    function redis_queue_del($str_key)
+    {
+        $redis = get_redis_pro();
+        if ($redis->exists("g_set_" . $str_key)) {
+            $r1 = $redis->del("g_set_" . $str_key);
+        }
+        if ($redis->exists("g_list_" . $str_key)) {
+            $r2 = $redis->del("g_list_" . $str_key);
+        }
+        return $r1 + $r2;
+//        $r_set = $redis->sMembers("g_set_" . $str_key);
+//        foreach ($r_set as $one) {
+//            $redis->sRem("g_set_" . $str_key, $one);
+//        }
+    }
+}
+
+/**
+ * @param $num  float
+ * @param $weight int
+ * @return string
+ *
+ * @author seaboyer@163.com
+ * @date 2018-09-25
+ * @version 1.0
+ */
+if (!function_exists('format_num')) {
+    function format_num($num, $weight = 4)//用抛弃法不进位
+    {
+        $num_fix = $num;
+        if (!empty($num)) {
+            $arr_p = explode('.', $num);
+            if (count($arr_p) == 2) {
+                $num_fix = $arr_p[0] . '.' . substr($arr_p[1], 0, $weight);
+            }
+        }
+        return $num_fix;
+    }
+}
+/**
+ * @param $price float
+ * @param $weight int
+ * @return string
+ *
+ * @author seaboyer@163.com
+ * @date 2018-09-25
+ * @version 1.0
+ */
+if (!function_exists('format_price')) {
+    function format_price($price, $weight = 8)//用抛弃法不进位
+    {
+        $price_fix = $price;
+        if (!empty($price)) {
+            $arr_p = explode('.', $price);
+            if (count($arr_p) == 2) {
+                $price_fix = $arr_p[0] . '.' . substr($arr_p[1], 0, $weight);
+            }
+        }
+        return $price_fix;
+    }
+}
+
+/**
+ * [redshare description]
+ * @param  $money float 投入资金
+ * @param  $num float 股数
+ * @param  $price float 股价
+ * @param  $to_id int 是否有邀请人
+ * @param array 综合数组
+ *
+ * @author seaboyer@163.com
+ * @date 2018-09-25
+ * @version 1.0
+ **/
+if (!function_exists('red_packet_share')) {
+    function red_packet_share($money, $num, $price, $to_id)
+    {
+        $money_b = $money * 0.1;            //10%分享资金
+        $money_a = $money - $money_b;        //剩余资金
+        $price_one = $money_b / $num;
+        $price_now = $price + $price_one;    //B10%钱提升当前股价
+        if (!empty($to_id)) {
+            $money_c = $money_a * 0.03;        //分给c3%的钱
+            if ($money_c > 1) {                //大于1元则,最多分1元.
+                $money_c = 1;
+            }
+        } else {
+            $money_c = 0;
+        }
+        $money_a = $money_a - $money_c;
+        $num_a = $money_a / $price_now;        //a股数//被邀请者的股数
+        $num_c = $money_c / $price_now;        //c股数//邀请者的股数
+        $num = $num + $num_a + $num_c;        //总股数
+
+        // $price_now = round($price_now, 8);
+        // $money_c = round($money_c, 4);
+        // $money_a = round($money_a, 4);
+        // $num_a = round($num_a, 8);
+        // $num_c = round($num_c, 8);
+        // $num = round($num, 8);
+
+        return array('price' => $price_now, 'num' => $num, 'num_a' => $num_a, 'num_c' => $num_c, 'money_a' => $money_a, 'money_c' => $money_c);
+    }
+}
+
+
+/**
+ * 图片展示时，计算字符串宽度(不是长度！):数字、字母占1，汉字占2
+ * @param $str
+ * @return int
+ * @author seaboyer@163.com
+ * @date 2018-10-25
+ * @version 1.0
+ */
+if (!function_exists('get_str_width')) {
+    function get_str_width($str)
+    {
+        $str1 = $str;
+        //1.emoji宽度
+        $width1 = strlen($str1);
+//        $str2 = preg_replace_callback(
+//            '/./u',
+//            function (array $match) {
+//                return strlen($match[0]) >= 4 ? '' : $match[0];
+//            },
+//            $str1);
+        $str2 = preg_replace("#(\\\ud[0-9a-f]{3})#i", "", $str1);
+        $width_2 = strlen($str2);
+        $width2 = 0;
+        $width12 = 0;
+        if ($width1 > $width_2) {
+            $width2 = $width1 - $width_2;
+            $width12 = round($width2 / 4) * 2;
+        }
+
+
+        //$emoji = "/[\u010000-\u10FFFF]/g";  // 4字节utf-16 = emoji
+        //return preg_match($emoji, $text);
+
+
+        //2.汉字宽度
+        $width3 = 0;
+        $width13 = 0;
+        $preg = "/[\x{4e00}-\x{9fa5}]+/u";
+        if (preg_match_all($preg, $str1, $matches)) {
+            $str_han_zi = implode('', $matches[0]);
+            //echo $str_han_zi."<br>";
+            $width3 = strlen($str_han_zi);
+            //echo $width3."<br>";
+            $width13 = round($width3 * 2 / 3);
+        }
+
+        //3.中文标点字符的宽度
+        //匹配这些中文标点符号 。 ？ ！ ， 、 ； ： “ ” ‘ ' （ ） 《 》 〈 〉 【 】 『 』 「 」 ﹃ ﹄ 〔 〕 … — ～ ﹏ ￥
+        //$preg_pattern = "/[\u3002|\uff1f|\uff01|\uff0c|\u3001|\uff1b|\uff1a|\u201c|\u201d|\u2018|\u2019|\uff08|\uff09|\u300a|\u300b|\u3008|\u3009|\u3010|\u3011|\u300e|\u300f|\u300c|\u300d|\ufe43|\ufe44|\u3014|\u3015|\u2026|\u2014|\uff5e|\ufe4f|\uffe5]/";
+
+        $regEx = '/[\p{P}]+/u';
+        $preg_str = preg_replace($regEx, '', $str1);
+        //echo $preg_str."<br>";
+        $width40 = strlen($preg_str);
+        $width4 = $width1 - $width40;
+        $width14 = round($width4 * 2 / 3);
+
+        //4.普通字符宽度
+        $width11 = $width1 - $width2 - $width3 - $width4;
+
+        //5.汇总整个字符宽度
+        $str_width = $width14 + $width13 + $width12 + $width11;
+        return $str_width;
+    }
+}
+
+/**
+ * 将十进制数字转换为二十六进制字母串
+ *  12000000 = BAGTMM 开始
+ * 308000000 = ZXZXHW 结束(约2.9亿)
+ * @author seaboyer 20181022
+ */
+if (!function_exists('num2alpha')) {
+    function num2alpha($intNum, $isLower = false)
+    {
+        $num26 = base_convert($intNum, 10, 26);
+        $add_code = $isLower ? 49 : 17;
+        $result = '';
+        for ($i = 0; $i < strlen($num26); $i++) {
+            $code = ord($num26{$i});
+            if ($code < 58) {
+                $result .= chr($code + $add_code);
+            } else {
+                $result .= chr($code + $add_code - 39);
+            }
+        }
+        return $result;
+    }
+}
+
+/**
+ * 将二十六进制字母串转换为十进制数字
+ * AAAAAA = 0
+ * BAGTMM = BAGTMM
+ * ZXZXHW = 308000000
+ * @author  seaboyer 20181022
+ */
+if (!function_exists('alpha2num')) {
+    function alpha2num($strAlpha)
+    {
+        if (ord($strAlpha{0}) > 90) {
+            $startCode = 97;
+            $reduceCode = 10;
+        } else {
+            $startCode = 65;
+            $reduceCode = -22;
+        }
+        $num26 = '';
+        for ($i = 0; $i < strlen($strAlpha); $i++) {
+            $code = ord($strAlpha{$i});
+            if ($code < $startCode + 10) {
+                $num26 .= $code - $startCode;
+            } else {
+                $num26 .= chr($code - $reduceCode);
+            }
+        }
+        return (int)base_convert($num26, 26, 10);
+    }
+}
+
+/**
+ * 获取邀请码，6位原始字母UID对应顺序 + 1、4位随机字母
+ * @param $id
+ * @return string
+ * @author  seaboyer 20181022
+ */
+if (!function_exists('get_invite_code')) {
+    function get_invite_code($id)
+    {
+        $arr_char = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+
+        $i_1 = mt_rand(0, 25);
+        $s_1 = $arr_char[$i_1];
+        $i_2 = mt_rand(0, 25);
+        $s_2 = $arr_char[$i_2];
+        $id_fix = $id + 12000000;
+        $s_id = num2alpha($id_fix);
+        $s_all = $s_1 . $s_id[0] . $s_id[1] . $s_2;
+        for ($j = 2; $j < 6; $j++) {
+            $s_all .= $s_id[$j];
+        }
+        return $s_all;
+    }
+}
+
+/**
+ * 解析邀请码，剔除下标0、3位随机字母，然后转回int即UID
+ * @param $code
+ * @return int
+ * @author  seaboyer 20181022
+ */
+if (!function_exists('check_invite_code')) {
+    function check_invite_code($code)
+    {
+        $id = 0;
+        if (strlen($code) == 8) {
+            $code_fix = '';
+            for ($j = 0; $j < 8; $j++) {
+                if ($j > 0 && $j <> 3) {
+                    $code_fix .= $code[$j];
+                }
+            }
+
+            $id_fix = alpha2num($code_fix);
+            $id = $id_fix - 12000000;
+        }
+        return $id;
+    }
+}
+
+/**
+ * 匹配图片地址
+ * @param string $src
+ * @return string
+ */
+if (!function_exists('imgSrc')) {
+    function imgSrc($src = '')
+    {
+        if (empty($src)) {
+            return '';
+        }
+        if (strstr($src, 'goodsimg') && !strstr($src, 'http')) {
+            return 'https://btj.yundian168.com/' . $src;
+        }
+
+        if (strstr($src, 'songshu') && !strstr($src, 'http')) {
+            return 'https://btj.yundian168.com/' . $src;
+        }
+
+        if (strstr($src, 'kuaikuimg') && !strstr($src, 'http')) {
+            return 'https://btj.yundian168.com/' . $src;
+        }
+        if (strstr($src, 'attachment') && !strstr($src, 'http')) {
+            return 'https://mallm.yundian168.com/' . $src;
+        }
+        if (strstr($src, 'ydxq/img/system/') && !strstr($src, 'http')) {
+            return 'https://oss.yundian168.com/' . $src;
+        }
+        if (!strstr($src, 'http')) {
+            return 'https://mallm.yundian168.com/attachment/' . $src;
+        }
+        return $src;
+    }
+}
+
+/**
+ * 二维数组按照指定字段进行排序
+ * @params array $array 需要排序的数组
+ * @params string $field 排序的字段
+ * @params string $sort 排序顺序标志 SORT_DESC 降序；SORT_ASC 升序
+ */
+if (!function_exists('arraySequence')) {
+    function arraySequence($array, $field, $sort = 'SORT_DESC')
+    {
+        $arrSort = array();
+        foreach ($array as $uniqid => $row) {
+            foreach ($row as $key => $value) {
+                $arrSort[$key][$uniqid] = $value;
+            }
+        }
+        array_multisort($arrSort[$field], constant($sort), $array);
+        return $array;
+    }
+}
+
+if (!function_exists('is_sns')) {
+    function is_sns($openid)
+    {
+        $is_sns = strstr($openid, 'sns_wa');
+        if (!$is_sns) {
+            $openid_new = 'sns_wa' . '_' . $openid;
+        } else {
+            $openid_new = $openid;
+        }
+        return $openid_new;
+    }
+}
+
+if (!function_exists('get_task_gold')) {
+    function get_task_gold($type = 1)
+    {
+        switch ($type) {
+            case 2:
+                $gold = 3000;
+                break;
+            case 3:
+                $gold = 6000;
+                break;
+            default:
+                $gold = 0;
+                break;
+        }
+        return $gold;
+    }
+}
+
+/**
+ * 处理苹果系统扫码返回“ABC，6912345678911”的码
+ * $str_bar_code
+ */
+if (!function_exists('check_barcode')) {
+    function check_barcode($str_bar_code)
+    {
+        $bar_code = $str_bar_code;
+
+        if (stripos($str_bar_code, ',') !== false) {
+            $arr_bar_code = explode(',', $str_bar_code);
+            if (count($arr_bar_code) == 2) {
+                $bar_code = $arr_bar_code[1];
+            }
+        }
+        return $bar_code;
+    }
+}
+
+//if (!function_exists('get_variable_name')) {
+//    function get_variable_name(&$var, $scope = null)
+//    {
+//        $scope = $scope == null ? $GLOBALS : $scope; // 如果没有范围则在globals中找寻
+//
+//        // 因有可能有相同值的变量，因此先将当前变量的值保存到一个临时变量中。
+//        //然后，再对原变量赋唯一值，以便查找出变量的名称，找到名字后，将临时变量的值重新赋值到原变量
+//        $tmp = $var;
+//
+//        $var = 'tmp_value_' . mt_rand();
+//        $name = array_search($var, $scope, true); // 根据值查找变量名称
+//
+//        $var = $tmp;
+//        return $name;
+//    }
+//}
+
+/**
+ * 系统运行情况
+ */
+if (!function_exists('ec')) {
+    function ec($arr = array())
+    {
+        echo "时间：" . time() . " 内存：" . round(memory_get_usage(true) / 1024 / 1024, 2) . "M  数据:" . count($arr) . "<br>";
+    }
+}
+
+/**
+ * 临时写日志，方便调试，不用一直写入
+ */
+if (!function_exists('sys_log')) {
+    function sys_log($info = '', $type = 0)
+    {
+        $m_SystemDebugLog = new \app\api\model\ydxq\SystemDebugLog();
+        $str_info = $info;
+        if (is_array($info)) {
+            $str_info = json_encode($info);
+        }
+        $array1['log_type'] = $type;
+        $array1['log_info'] = $str_info;
+        $array1['create_time'] = time();
+        $m_SystemDebugLog->insertInfo($array1);
+    }
+}

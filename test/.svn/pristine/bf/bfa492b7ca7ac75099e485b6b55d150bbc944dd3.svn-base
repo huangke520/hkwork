@@ -1,0 +1,123 @@
+<?php
+class ItemUploadRequest
+{
+	/** 
+	 * 商品编号
+	 **/
+	private $prd_no;
+	
+	/** 
+	 * 商品名称
+	 **/
+	private $name;
+	
+	/** 
+	 * 图片地址
+	 **/
+	private $pic;
+	
+	/** 
+	 * 图片地址
+	 **/
+	private $weight;
+	
+	/** 
+	 * 货品重量
+	 **/
+	private $enabled;
+	
+	/** 
+	 * SKU列表
+	 **/
+	private $skus;
+	
+	private $apiParas = array();
+	
+	public function setPrdNo($prd_no)
+	{
+		$this->prd_no = $prd_no;
+		$this->apiParas["prd_no"] = $prd_no;
+	}
+
+	public function getPrdNo()
+	{
+		return $this->prd_no;
+	}
+
+	public function setName($name)
+	{
+		$this->name = $name;
+		$this->apiParas["name"] = $name;
+	}
+
+	public function getName()
+	{
+		return $this->name;
+	}
+	
+	public function setPic($pic)
+	{
+		$this->pic = $pic;
+		$this->apiParas["pic"] = $pic;
+	}
+
+	public function getPic()
+	{
+		return $this->pic;
+	}
+	
+	public function setWeight($weight)
+	{
+		$this->weight = $weight;
+		$this->apiParas["weight"] = $weight;
+	}
+
+	public function getWeight()
+	{
+		return $this->weight;
+	}
+
+	public function setEnabled($enabled)
+	{
+		$this->enabled = $enabled;
+		$this->apiParas["enabled"] = $enabled;
+	}
+
+	public function getEnabled()
+	{
+		return $this->enabled;
+	}
+
+	public function setSkus($skus)
+	{
+		$this->skus = $skus;
+		$this->apiParas["skus"] = $skus;
+	}
+
+	public function getSkus()
+	{
+		return $this->skus;
+	}
+
+	public function getApiMethodName()
+	{
+		return "item.upload";
+	}
+	
+	public function getApiParas()
+	{
+		return $this->apiParas;
+	}
+	
+	public function check()
+	{
+		RequestCheckUtil::checkNotNull($this->prd_no,"prd_no");
+		RequestCheckUtil::checkNotNull($this->name,"name");
+		RequestCheckUtil::checkNotNull($this->skus,"skus");
+	}
+	
+	public function putOtherTextParam($key, $value) {
+		$this->apiParas[$key] = $value;
+		$this->$key = $value;
+	}
+}

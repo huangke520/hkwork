@@ -1,0 +1,258 @@
+<?php
+
+/**
+ * Author: seaboyer@163.com
+ * Date: 2019-08-08
+ */
+
+namespace app\api\controller;
+
+use app\api\model\ydxq\BbBaseCoupon as BbBaseCouponModel;
+use app\api\model\ydxq\ShopMemberCoupon as ShopMemberCouponModel;
+use think\Db;
+
+class BbBaseCoupon extends BaseController {
+
+    private $bb_base_coupon_model;
+    private $shop_member_coupon_model;
+    public function __construct() {
+        parent::__construct();
+        $this->bb_base_coupon_model = new BbBaseCouponModel();
+        $this->shop_member_coupon_model = new ShopMemberCouponModel();
+    }
+
+    //用户领取的优惠券列表
+    public function receive_lists(){
+        $param = $this->request_param;
+
+        if(!isset($param['openid']) || empty($openid = $param['openid'])){
+            return sdk_return('', 0, '缺少参数openid');
+        }
+
+        //修改优惠券状态
+        $this->updateUserCouponStatus($openid);
+
+        $time = time();
+
+        //获取当前用户的优惠券列表
+        $user_coupons = $this->shop_member_coupon_model->getAllListPro([['openid', '=', $openid], ['coupon_status', 'in', [1,2,3,7]]], ['id', 'coupon_id', 'time_end', 'coupon_status'], ['id'=>'desc']);
+
+
+
+        $coupon_ids = array_column($user_coupons, 'coupon_id');
+        $base_coupons = $this->bb_base_coupon_model->getAllList([['id', 'in', $coupon_ids]]);
+        $base_coupons_tmp = [];
+        foreach ($base_coupons as $k => $v){
+            $base_coupons_tmp[ $v['id'] ] = $v;
+        }
+
+        foreach ($user_coupons as $k => $v){
+            if(isset($base_coupons_tmp[ $v['coupon_id'] ])){
+                $base_coupon = $base_coupons_tmp[ $v['coupon_id'] ];
+                $user_coupons[$k]['limit_money'] = $base_coupon['limit_money'];//开始使用金额
+                $user_coupons[$k]['money_value'] = $base_coupon['money_value'];//面值
+                $user_coupons[$k]['coupon_title'] = '全品类通用优惠券';
+                $user_coupons[$k]['surplus_day'] = $this->diffBetweenTwoDays($time, $v['time_end']);
+                $user_coupons[$k]['time_end'] = date('Y-m-d', $v['time_end']);//到期时间
+            }
+        }
+
+        return sdk_return($user_coupons, 1, '获取成功');
+    }
+
+    //计算两个时间之间的天数
+    public function diffBetweenTwoDays ($start_date, $end_date){
+        return round(abs($end_date - $start_date) / 3600 / 24) + 1;
+    }
+
+    //获取可使用优惠券
+    public function get_canuse_coupon(){
+        $param = $this->request_param;
+        if(!isset($param['openid']) || empty($openid = $param['openid'])){
+            return sdk_return('', 0, '缺少参数openid');
+        }
+
+        if(!isset($param['price']) || empty($price = $param['price'])){
+            return sdk_return('', 0, '缺少参数price');
+        }
+
+        //修改优惠券状态
+        $this->updateUserCouponStatus($openid);
+
+        $time = time();
+
+        $coupons = $this->shop_member_coupon_model->getCanuseCoupon($openid);  //$price
+
+        $can_use_arr = $not_can_use_arr = [];
+        //获取当前用户所有可用的优惠券
+        foreach ($coupons as $k => $v){
+            $v['coupon_title'] = '全品类通用优惠券';
+            $v['surplus_day'] = $this->diffBetweenTwoDays($time, $v['time_end']);
+            $v['time_end'] = date('Y-m-d', $v['time_end']);//到期时间
+            if($v['limit_money'] <= $price){
+                $v['is_canuse'] = 1;//1可用 0不可用
+                $can_use_arr[] = $v;
+            }else{
+                $v['is_canuse'] = 0;//0不可用
+                $not_can_use_arr[] = $v;
+            }
+        }
+
+        //按照面值排序
+        //$user_coupons = arraySequence($user_coupons, 'money_value');
+        $can_use_arr = $this->arraySort($can_use_arr, 'money_value');
+
+        $user_coupons = array_merge($can_use_arr, $not_can_use_arr);
+
+        $content = '';
+        if(!empty($can_use_arr)){
+            //$content = '本单' . count($can_use_arr) . '张优惠换可供您挑选，最高可节省' . $can_use_arr[0]['money_value'] . '元，点击“立即购买”进入确认点单页确认优惠券已使用';
+            $content = '您有' . count($can_use_arr) . '张优惠券，点击立即购买后可选择使用';
+        }
+
+        $return_data = [
+            'defaults'       =>  empty($can_use_arr) ? '' : $can_use_arr[0],
+            'content'       =>  $content,
+            'lists'         =>  $user_coupons
+        ];
+
+        return sdk_return($return_data, 1, '获取成功');
+    }
+
+    //更新当前用户优惠券状态
+    public function updateUserCouponStatus($openid = ''){
+        if(empty($openid)){
+            return [];
+        }
+
+        $time = time();
+        //修改已过期
+        $where = "openid = '{$openid}' and coupon_status = 2 and time_end <= $time";
+        $this->shop_member_coupon_model->updateInfoPro($where, ['coupon_status'=>7]);
+
+        //修改已删除
+        $del_time = $time - 5 * 24 * 3600;
+        $del_where = "openid = '{$openid}' and coupon_status in (3, 7) and time_end < $del_time";
+        $this->shop_member_coupon_model->updateInfoPro($del_where, ['coupon_status'=>9]);
+    }
+
+    /**
+     * 二位数组排序
+     * @param $data  二维数组
+     * @param string $field 需要的字符安
+     * @param string $sort_type  SORT_ASC升序  SORT_DESC降序
+     * @return string
+     */
+    public static function arraySort($data, $field = '', $sort_type = SORT_DESC){
+        if(!count($data) || count($data) == count($data, 1)  || empty($field)){
+            return [];
+        }
+        foreach ($data as $k => $v){
+            if(false == array_key_exists($field, $v)){
+                unset($data[$k]);//数组元素过滤,避免报错
+            }
+        }
+        $vs = array_column($data, $field);
+        if(!count($vs)){
+            return [];
+        }
+
+        array_multisort($vs, $sort_type, $data);
+        return array_values($data);
+    }
+
+    /**
+     * 领取活动优惠券
+     */
+    public function getActivityCoupon() {
+        $param = $this->request->param();
+        $sup_id = !empty($param['sup_id']) ? $param['sup_id'] : sdk_return('', 6, '参数缺失');//店铺ID
+        $user_openid = !empty($param['user_openid']) ? $param['user_openid'] : sdk_return('', 6, '参数缺失');//用户openID
+        $union_id = !empty($param['union_id']) ? $param['union_id'] : '';//用户union_id
+        $task_id = !empty($param['task_id']) ? $param['task_id'] : sdk_return('', 6, '参数缺失');//领取的数据ID（taskID）
+        $gift = !empty($param['gift']) ? $param['gift'] : sdk_return('', 6, '参数缺失');//领取的是哪一次的
+        $coupon_id = !empty($param['coupon_id']) ? $param['coupon_id'] : sdk_return('', 6, '参数缺失');//优惠券ID，json格式
+        $base_coupon_id_arr = json_decode($coupon_id, true);
+//        $base_coupon_id_arr = explode(',',$coupon_id);
+        if(!is_array($base_coupon_id_arr)){
+            sdk_return('',6,'领取优惠券错误');
+        }else{
+            if(empty(count($base_coupon_id_arr))){
+                sdk_return('',6,'领取优惠券错误！');
+            }
+        }
+        $user_openid = is_sns($user_openid);
+        $is_gift = '';
+        $gift_type = '';
+        $gift_value = '';
+        if ($gift == 2) {
+            //领取的二天的金币
+            $is_gift = 'gift2';
+            $gift_type = 'gift2_type';
+            $gift_value = 'gift2_value';
+        } elseif ($gift == 3) {
+            //领取的三天的金币
+            $is_gift = 'gift3';
+            $gift_type = 'gift3_type';
+            $gift_value = 'gift3_value';
+        }
+        if(empty($is_gift)){
+            sdk_return('',6,'领取天数错误');
+        }
+        //查询task数据
+        $task_arr = Db::connect('db_mini_mall')->table('ims_yd_supplier_task')->where('id = '.$task_id)->find();
+        //判断是否领取过奖励
+        if(!empty($task_arr[$is_gift])){
+            sdk_return('',6,'您已领取过当次奖励');
+        }
+        //修改领取记录表
+        $update = null;
+        $update = [
+            $is_gift => time(),
+            $gift_type => 2,//1金币，2优惠券
+            $gift_value => $coupon_id,//优惠券ID
+        ];
+        Db::connect('db_mini_mall')->table('ims_yd_supplier_task')->where('id = '.$task_id)->update($update);
+        unset($update);
+        $now_time = time();
+        foreach ($base_coupon_id_arr as $key => $base_coupon_id){
+            //计算当前优惠券的截止时间
+            $coupon_data = $this->bb_base_coupon_model->getInfo(['id'=>$base_coupon_id['id']]);
+            $valid_day = !empty($coupon_data['valid_day']) ? $coupon_data['valid_day'] : 1;
+            $time_end = $now_time + ((60 * 60 * 24) * $valid_day);
+            //优惠券数量
+            $coupon_num = $base_coupon_id['num'];
+            for ($i = 0; $i < $coupon_num; $i++) {
+                $insert_member_coupon = [
+                    'coupon_id' => $base_coupon_id['id'],//周活动领取金币
+                    'openid' => $user_openid,//周活动领取金币
+                    'openid_time' => $now_time,
+                    'time_start' => $now_time,
+                    'time_end' => $time_end,
+                    'create_time' => $now_time,
+                    'coupon_status' => 2,
+                    'status' => 1,
+                ];
+                Db::connect('db_mini_mall')->table('ims_ewei_shop_member_coupon')->insertGetId($insert_member_coupon);
+            }
+        }
+        //查询当前领取状况
+        $task_data = Db::connect('db_mini_mall')->table('ims_yd_supplier_task')->where('id = '.$task_id)->find();
+        $content = '暂无可领取好礼';
+        //下单两次
+        if($task_data['pay_count'] == 2){
+            if($task_data['gift2'] == 0){
+                $content = '您有1份好礼待领取';
+            }
+        }
+        //下单三次及以上
+        if($task_data['pay_count'] >= 3){
+            if($task_data['gift2'] == 0 && $task_data['gift3'] == 0){
+                $content = '您有2份好礼待领取';
+            }else{
+                $content = '您有1份好礼待领取';
+            }
+        }
+        sdk_return(['content' => $content],1,'领取成功');
+    }
+}

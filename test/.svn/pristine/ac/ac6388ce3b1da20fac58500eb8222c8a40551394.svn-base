@@ -1,0 +1,173 @@
+<?php
+class VipSaleOrderRequest
+{
+	/** 
+	 * 会员编号 
+	 **/
+	private $order_id;
+	
+	private $order_type;
+	
+	private $member;
+	
+	/** 
+	 * 页码 当前页数 从1开始
+	 **/
+	private $store_no;
+	
+	private $pay_type;
+	
+	/** 
+	 * 每页大小 最大不能超过100
+	 **/
+	private $payment_money;
+	
+	private $payment_bacc_money;
+	
+	private $payment_vip_money;
+	
+	private $give_integral;
+	
+	private $remark;
+	
+	private $items;
+	
+	private $apiParas = array();
+	
+	public function setOrderId($order_id)
+	{
+		$this->order_id = $order_id;
+		$this->apiParas["order_id"] = $order_id;
+	}
+
+	public function getOrderId()
+	{
+		return $this->order_id;
+	}
+	
+	public function setOrderType($order_type)
+	{
+		$this->order_type = $order_type;
+		$this->apiParas["order_type"] = $order_type;
+	}
+
+	public function getOrderType()
+	{
+		return $this->order_type;
+	}
+	
+	public function setMember($member)
+	{
+		$this->member = $member;
+		$this->apiParas["member"] = $member;
+	}
+
+	public function getMember()
+	{
+		return $this->member;
+	}
+
+	public function setStoreNo($store_no)
+	{
+		$this->store_no = $store_no;
+		$this->apiParas["store_no"] = $store_no;
+	}
+
+	public function getStoreNo()
+	{
+		return $this->store_no;
+	}
+	
+	public function setPayType($pay_type)
+	{
+		$this->pay_type = $pay_type;
+		$this->apiParas["pay_type"] = $pay_type;
+	}
+
+	public function getPayType()
+	{
+		return $this->pay_type;
+	}
+
+	public function setPaymentMoney($payment_money)
+	{
+		$this->payment_money = $payment_money;
+		$this->apiParas["payment_money"] = $payment_money;
+	}
+
+	public function getPaymentMoney()
+	{
+		return $this->payment_money;
+	}
+	
+	public function setPaymentBaccMoney($payment_bacc_money)
+	{
+		$this->payment_bacc_money = $payment_bacc_money;
+		$this->apiParas["payment_bacc_money"] = $payment_bacc_money;
+	}
+
+	public function getPaymentBaccMoney()
+	{
+		return $this->payment_bacc_money;
+	}
+	
+	public function setPaymentVipMoney($payment_vip_money)
+	{
+		$this->payment_vip_money = $payment_vip_money;
+		$this->apiParas["payment_vip_money"] = $payment_vip_money;
+	}
+
+	public function getPaymentVipMoney()
+	{
+		return $this->payment_vip_money;
+	}
+	
+	public function setGiveIntegral($give_integral)
+	{
+		$this->give_integral = $give_integral;
+		$this->apiParas["give_integral"] = $give_integral;
+	}
+
+	public function getGiveIntegral()
+	{
+		return $this->give_integral;
+	}
+	
+	public function setRemark($remark)
+	{
+		$this->remark = $remark;
+		$this->apiParas["remark"] = $remark;
+	}
+
+	public function getRemark()
+	{
+		return $this->remark;
+	}
+	
+	public function setItems($items)
+	{
+		$this->items = $items;
+		$this->apiParas["items"] = $items;
+	}
+
+	public function getItems()
+	{
+		return $this->items;
+	}
+	
+	public function getApiMethodName()
+	{
+		return "shanhai.sale.order";
+	}
+	
+	public function getApiParas()
+	{
+		return $this->apiParas;
+	}
+	
+	public function check()
+	{
+		//RequestCheckUtil::checkNotNull($this->page_index,"page_index");
+		//RequestCheckUtil::checkNotNull($this->page_size,"page_size");
+	}
+}

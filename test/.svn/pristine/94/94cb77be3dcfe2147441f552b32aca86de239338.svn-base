@@ -1,0 +1,138 @@
+<?php
+class VipStoreRequest
+{
+	private $order_id;
+	
+	private $order_type;
+	
+	private $member;
+
+	private $pay_type;
+	
+	private $store_no;
+
+	private $store_money;
+	
+	private $give_money;
+	
+	private $store_integral;
+	
+	private $remark;
+	
+	private $apiParas = array();
+	
+	public function setOrderId($order_id)
+	{
+		$this->order_id = $order_id;
+		$this->apiParas["order_id"] = $order_id;
+	}
+
+	public function getOrderId()
+	{
+		return $this->order_id;
+	}
+	
+	public function setOrderType($order_type)
+	{
+		$this->order_type = $order_type;
+		$this->apiParas["order_type"] = $order_type;
+	}
+
+	public function getOrderType()
+	{
+		return $this->order_type;
+	}
+	
+	public function setMember($member)
+	{
+		$this->member = $member;
+		$this->apiParas["member"] = $member;
+	}
+
+	public function getMember()
+	{
+		return $this->member;
+	}
+
+	public function setPayType($pay_type)
+	{
+		$this->pay_type = $pay_type;
+		$this->apiParas["pay_type"] = $pay_type;
+	}
+
+	public function getPayType()
+	{
+		return $this->pay_type;
+	}
+
+	public function setStoreNo($store_no)
+	{
+		$this->store_no = $store_no;
+		$this->apiParas["store_no"] = $store_no;
+	}
+
+	public function getStoreNo()
+	{
+		return $this->store_no;
+	}
+
+	public function setStoreMoney($store_money)
+	{
+		$this->store_money = $store_money;
+		$this->apiParas["store_money"] = $store_money;
+	}
+
+	public function getStoreMoney()
+	{
+		return $this->store_money;
+	}
+	
+	public function setGiveMoney($give_money)
+	{
+		$this->give_money = $give_money;
+		$this->apiParas["give_money"] = $give_money;
+	}
+
+	public function getGiveMoney()
+	{
+		return $this->give_money;
+	}
+	
+	public function setStoreIntegral($store_integral)
+	{
+		$this->store_integral = $store_integral;
+		$this->apiParas["store_integral"] = $store_integral;
+	}
+
+	public function getStoreIntegral()
+	{
+		return $this->store_integral;
+	}
+	
+	public function setRemark($remark)
+	{
+		$this->remark = $remark;
+		$this->apiParas["remark"] = $remark;
+	}
+
+	public function getRemark()
+	{
+		return $this->remark;
+	}
+	
+	public function getApiMethodName()
+	{
+		return "shanhai.vip.store";
+	}
+	
+	public function getApiParas()
+	{
+		return $this->apiParas;
+	}
+	
+	public function check()
+	{
+		//RequestCheckUtil::checkNotNull($this->page_index,"page_index");
+		//RequestCheckUtil::checkNotNull($this->page_size,"page_size");
+	}
+}

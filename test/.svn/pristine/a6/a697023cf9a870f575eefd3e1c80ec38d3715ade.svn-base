@@ -1,0 +1,720 @@
+<?php
+
+namespace app\api\controller;
+
+use app\api\model\ydxq\ShopGoods as ShopGoodsModel;
+use think\Db;
+
+class WishOldGoods extends BaseController {
+    private $shop_goods_model;
+
+    public function __construct() {
+        parent::__construct();
+        $this->shop_goods_model = new ShopGoodsModel();
+    }
+
+    /**
+     * 插入扫码记录
+     */
+    private function addScanLog($sup_id = 0,$open_id = '',$bar_code = '',$result_type = 99){
+        //查询是否已经插入当前值
+//        $scan_log_where = [
+//            ['sup_id','=',$sup_id],
+//            ['open_id','=',$open_id],
+//            ['bar_code','=',$bar_code],
+//        ];
+//        $is_scan_log = Db::connect('db_mini_mall')->table('ims_member_scan_log')->where($scan_log_where)->find();
+//        if(empty($is_scan_log)){
+            //插入当前记录
+            $insert = [
+                'sup_id' => $sup_id,
+                'open_id' => $open_id,
+                'bar_code' => $bar_code,
+                'result_type' => $result_type,
+                'create_time' => time(),
+            ];
+            Db::connect('db_mini_mall')->table('ims_member_scan_log')->insert($insert);
+//        }
+    }
+
+    /**
+     * 扫描条码接口
+     */
+    public function scanCode(){
+        $param = $this->request->param();
+        $user_openid = !empty($param['user_openid']) ? $param['user_openid'] : sdk_return('',6,"缺少参数");//用户openID
+        $is_sns = strstr($user_openid,'sns_wa_');
+        if(!$is_sns){
+            $user_openid =   'sns_wa_'.$user_openid;
+        }
+        $code = !empty($param['bar_code']) ? $param['bar_code'] : sdk_return('',6,"缺少参数");//条形码
+        $sup_id = !empty($param['sup_id']) ? $param['sup_id'] : sdk_return('',6,"缺少参数");//店铺ID
+
+        //默认商品信息
+        $goods_id = 0;//商品名称
+        $goods_name = '';//商品名称
+        $b_name = '';//品牌名称
+        $brand_id = '';//品牌id
+        $cate_bb1_name = '';//一级分类名称
+        $cate_bb1_id = '';//一级分类id
+        $cate_bb2_name = '';//二级分类名称
+        $cate_bb2_id = '';//二级分类id
+        $img = '';//商品图片
+        $spec = '';//商品规格
+        $channel_count_arr = '';//商品报价数量
+        $come_where = 99;//1跳之前的详情页，2货比三家详情页，3京东库中详情页，99没有商品数据的详情页
+        $href_brand = 0;//0不可以跳转，1：可以跳转
+        $href_cate1 = 0;//0不可以跳转，1：可以跳转
+        $href_cate2 = 0;//0不可以跳转，1：可以跳转
+
+        //根据条形码去查询是否有商品数据
+        //查询孙宇店铺商品
+        $goods_data = Db::connect('db_mini_mall')->query("SELECT a.id,a.skuid,a.sale_pirce from ims_ewei_shop_goods as a left join ims_yd_supplier_goods as b on a.id = b.goods_id where a.goods_code_list like '%{$code}%' and a.status = 1 and b.status = 1 and a.total > 0 and b.supplier_id = {$sup_id} and a.deleted = 0 and a.is_activity = 0 order by a.salesreal limit 1");
+        if(!empty(count($goods_data))){
+            //说明该商品在孙宇店铺有售，可以进之前的商品详情页面
+            $goods_id = $goods_data[0]['id'];
+            $come_where = 1;//跳之前的详情页
+        }else{
+            //去货比三家找商品
+            $is_hbsj = 0;
+            $goods_data = Db::connect('db_mini_mall')->query("SELECT a.id,a.goods_name,a.brand_id,a.cate_bb1,a.cate_bb2,a.img,b.b_name from ims_bb_goods_item as a left join ims_bb_brand as b on a.brand_id = b.id where a.code_list like '%{$code}%'");
+            if(!empty(count($goods_data))){
+                foreach ($goods_data as $one_goods){
+                    $channel_count = 0;
+                    $goods_item_id = $one_goods['id'];//商品itemID
+                    //根据itemID去查询sku，有可能会查询到多个
+                    $sku_data = Db::connect('db_mini_mall')->query("SELECT id,spec from ims_bb_sku where goods_id = {$goods_item_id}");
+                    if(!empty(count($sku_data))){
+                        foreach ($sku_data as $one_sku){
+                            //根据sku查询报价数组
+                            $channel_count_data = Db::connect('db_mini_mall')->query("SELECT a.price,b.c_name,a.price_avg as one_price from ims_bb_price_list as a left join ims_bb_channel as b on a.channel_id = b.id where sku_id = {$one_sku['id']}");
+                            if(count($channel_count_data) > $channel_count){
+//                                foreach ($channel_count_data as $p_k => $p_v){
+//                                    $channel_count_data[$p_k]['one_price'] = $p_v[];
+//                                }
+                                $come_where = 2;//货比三家详情页
+                                $is_hbsj = 1;
+                                $channel_count = count($channel_count_data);
+                                //查询一级分类和二级分类
+                                $cate_data = Db::connect('db_mini_mall')->query("SELECT id,c_name from ims_bb_cate_bb where id in({$one_goods['cate_bb1']},{$one_goods['cate_bb2']})");
+                                $cate_arr = array();
+                                if(!empty(count($cate_data))){
+                                    foreach ($cate_data as $one_cate){
+                                        $cate_arr[$one_cate['id']] = $one_cate['c_name'];
+                                    }
+                                }
+                                $cate_bb1_name= !empty($cate_arr[$one_goods['cate_bb1']]) ? $cate_arr[$one_goods['cate_bb1']] : '';//一级分类名称
+                                $cate_bb1_id= $one_goods['cate_bb1'];//一级分类id
+                                $cate_bb2_name = !empty($cate_arr[$one_goods['cate_bb2']]) ? $cate_arr[$one_goods['cate_bb2']] : '';//二级分类名称
+                                $cate_bb2_id = $one_goods['cate_bb2'];//二级分类id
+                                $goods_name = $one_goods['goods_name'];//商品名称
+                                $b_name = $one_goods['b_name'];//品牌名称
+                                $brand_id = $one_goods['brand_id'];//品牌名称
+                                $img = $one_goods['img'];//商品图片
+                                $spec = $one_sku['spec'];//商品规格
+                                $channel_count_arr = $channel_count_data;//商品图片
+                                //查询孙宇店铺是否有当前品牌
+                                $is_have_brand = Db::connect('db_mini_mall')->table('ims_bb_supplier_cate_brand')->where('brand_id = '.$brand_id.' and sup_id = '.$sup_id)->count();
+                                if(!empty($is_have_brand)){
+                                    $href_brand = 1;
+                                }
+                                //查询孙宇店铺是否有当前一级分类
+                                $is_have_cate1 = Db::connect('db_mini_mall')->table('ims_bb_supplier_cate')->where('cate_bb1 = '.$cate_bb1_id.' and sup_id = '.$sup_id)->count();
+                                if(!empty($is_have_cate1)){
+                                    $href_cate1 = 1;
+                                }
+                                //查询孙宇店铺是否有当前一级分类
+                                $is_have_cate2 = Db::connect('db_mini_mall')->table('ims_bb_supplier_cate')->where('cate_bb2 = '.$cate_bb2_id.' and sup_id = '.$sup_id)->count();
+                                if(!empty($is_have_cate2)){
+                                    $href_cate2 = 1;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            //如果货比三家没有当前商品，去60万数据表中查询
+            if($is_hbsj == 0){
+                $come_where = 3;//京东库中详情页
+                $jd_goods_data = Db::connect('db_ydhl')->query("SELECT goods_name,ben_img,price,trademark,spec from yd_base_goods where code = {$code} and success = 2");
+                if(!empty(count($jd_goods_data))){
+                    $goods_name = $jd_goods_data[0]['goods_name'];//商品名称
+                    $b_name = $jd_goods_data[0]['trademark'];//品牌名称
+                    //根据品牌名称去查询货比三家中的品牌ID
+
+                    $img = $jd_goods_data[0]['ben_img'];//商品图片
+                    $spec = $jd_goods_data[0]['spec'];//商品规格
+                }
+            }
+        }
+
+        //插入扫码记录
+        $this->addScanLog($sup_id,$user_openid,$code,$come_where);
+        //查询当前用户是否已经加入过心愿单
+        $is_wish_where = [
+            ['sup_id','=',$sup_id],
+            ['open_id','=',$user_openid],
+            ['bar_code','=',$code],
+            ['status','=',1],
+        ];
+        $is_wish = Db::connect('db_mini_mall')->table('ims_member_scan_wish')->where($is_wish_where)->find();
+        if(!empty($is_wish)){
+            $wish_id = $is_wish['id'];
+            $is_wish = 1;
+        }else{
+            $is_wish = 0;
+            $wish_id = 0;
+        }
+        if(empty($goods_name)){
+            if(empty($goods_id)){
+                $come_where = 99;
+            }
+        }
+        $return_data = [
+            'goods_id' => $goods_id,//商品名称
+            'goods_name' => $goods_name,//商品名称
+            'b_name' => $b_name,//品牌名称
+            'brand_id' => $brand_id,//品牌id
+            'cate_bb1_name' => $cate_bb1_name,//一级分类名称
+            'cate_bb1_id' => $cate_bb1_id,//一级分类id
+            'cate_bb2_name' => $cate_bb2_name,//二级分类名称
+            'cate_bb2_id' => $cate_bb2_id,//二级分类id
+            'img' => !empty($img) ? $img : 'https://mallm.yundian168.com/attachment/images/xiaochengxu/zw.png',//商品图片
+            'spec' => $spec,//商品规格
+            'channel_count_arr' => $channel_count_arr,//商品报价数量
+            'come_where' => $come_where,//默认跳转详情页，默认为没有的页面
+            'is_wish' => $is_wish,//是否已添加为心愿单，1：是，0：否
+            'wish_id' => $wish_id,//心愿单ID
+            'href_brand' => $href_brand,//0不可以跳转，1：可以跳转
+            'href_cate1' => $href_cate1,//0不可以跳转，1：可以跳转
+            'href_cate2' => $href_cate2,//0不可以跳转，1：可以跳转
+        ];
+        sdk_return($return_data,0,'success');
+    }
+
+    /**
+     * 加入心愿单
+     */
+    public function addWish(){
+        $param = $this->request->param();
+        $sup_id = !empty($param['sup_id']) ? $param['sup_id'] : sdk_return('',6,'缺少参数');//店铺ID
+        $open_id = !empty($param['user_openid']) ? $param['user_openid'] : sdk_return('',6,'缺少参数');//用户openID
+        $is_sns = strstr($open_id,'sns_wa_');
+        if(!$is_sns){
+            $open_id =   'sns_wa_'.$open_id;
+        }
+        $result_type = !empty($param['come_where']) ? $param['come_where'] : sdk_return('',6,'缺少参数');//识别类型
+        $bar_code = !empty($param['bar_code']) ? $param['bar_code'] : sdk_return('',6,'缺少参数');//条形码
+        //查询当前用户是否已经加入过心愿单
+        $is_wish_where = [
+            ['sup_id','=',$sup_id],
+            ['open_id','=',$open_id],
+            ['bar_code','=',$bar_code],
+            ['status','=',1],
+        ];
+        $is_wish = Db::connect('db_mini_mall')->table('ims_member_scan_wish')->where($is_wish_where)->find();
+        if(empty($is_wish)){
+            $insert = [
+                'sup_id' => $sup_id,
+                'open_id' => $open_id,
+                'bar_code' => $bar_code,
+                'result_type' => $result_type,
+                'status' => 1,
+                'create_time' => time(),
+            ];
+            $res = Db::connect('db_mini_mall')->table('ims_member_scan_wish')->insert($insert);
+            if(!empty($res)){
+                $wish_id = Db::connect('db_mini_mall')->getLastInsID();
+                $data['wish_id'] = $wish_id;
+                sdk_return($wish_id,0,'success');
+            }else{
+                sdk_return('',6,'加入失败');
+            }
+        }else{
+            sdk_return('',6,'您已添加当前商品');
+        }
+    }
+
+    /**
+     * 删除心愿单
+     */
+    public function delWish(){
+        $param = $this->request->param();
+        $wish_id = !empty($param['wish_id']) ? $param['wish_id'] : sdk_return('',6,'缺少参数');
+        $update['status'] = 0;
+        $res = Db::connect('db_mini_mall')->table('ims_member_scan_wish')->where('id',$wish_id)->update($update);
+        if(!empty($res)){
+            sdk_return('',0,'success');
+        }else{
+            sdk_return('',6,'删除失败');
+        }
+    }
+
+    /**
+     * 货比三家的商品推荐列表
+     */
+    public function recommends(){
+        $param = $this->request->param();
+        $brand_id = !empty($param['brand_id']) ? $param['brand_id'] : sdk_return('',6,'缺少参数');//品牌ID
+        $sup_id = !empty($param['sup_id']) ? $param['sup_id'] : sdk_return('',6,'缺少参数');//店铺ID
+        $bb_cate2 = !empty($param['bb_cate2']) ? $param['bb_cate2'] : 0;//二级分类ID
+        $user_openid = !empty($param['user_openid']) ? $param['user_openid'] : sdk_return('',6,'缺少参数');//用户openID
+        $user_openid = is_sns($user_openid);
+
+        //是否为需要展示新添加商品的用户
+        $manager_where = [
+            ['sup_id','=',$sup_id],
+            ['openid','=',$user_openid],
+            ['status','=',1],
+        ];
+        $is_special_user = Db::connect('db_mini_mall')->table('ims_yd_supplier_manager')->where($manager_where)->find();
+        if(!empty($is_special_user)){
+            //需要展示
+            $is_activity = 1;
+        }else{
+            //不需要展示
+            $is_activity = 0;
+        }
+
+        //获取skuid的报价数量
+        $where = [
+            ['g.brand_id', '=', $brand_id],
+            ['g.sup_id', '=', $sup_id],
+            ['g.status', '=', 1],
+            ['g.id', '<>', 68293],
+        ];
+//        if($is_activity == 0){
+//            $where[] = ['g.is_activity','=',0];
+//        }
+        $where[] = ['g.is_activity','=',0];
+        //查询当前购买c端店铺的点位地址
+        $user_area_id = Db::connect('db_btj_new')->table('potential_customer')->field('area_id,address')->where('is_validity = 1 and xcx_openid = "'.$user_openid.'"')->find();
+//        echo Db::connect('db_btj_new')->getLastSql();exit;
+        if(empty($user_area_id['area_id'])){
+            //没有area_id,调用高德接口获取
+            if(!empty($user_area_id['address'])){
+                $url = "https://restapi.amap.com/v3/geocode/geo?output=JSON&key=ea30dd0bc2c1f965f535433fd54d292d&address=".preg_replace('# #','',$user_area_id['address']);
+// 执行请求
+                $ch = curl_init();
+                curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+                curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+                curl_setopt($ch, CURLOPT_URL, $url);
+                $data = curl_exec($ch);
+                curl_close($ch);
+                $result = json_decode($data, true);
+                $location = $result['geocodes'][0]['location'];
+                $loca = explode(',',$location);
+//                var_dump($location.$result['geocodes'][0]['province'].",".$result['geocodes'][0]['city'].",".$result['geocodes'][0]['district'].":".$i++);
+                if($location) {
+                    //省码
+                    $province_arr = Db::connect('db_wehub')->table('regionh')->field('id')->where('parent_id = 0 and name = "'.$result['geocodes'][0]['province'].'"')->find();
+                    $province = $province_arr['id'] > 0 ? $province_arr['id'] : '0';
+                    //市码
+                    $city_arr = Db::connect('db_wehub')->table('regionh')->field('id')->where('parent_id = '.$province.' and name = "'.mb_substr($result['geocodes'][0]['city'],0,mb_strlen($result['geocodes'][0]['city'])-1).'"')->find();
+                    $city = $city_arr['id'] > 0 ? $city_arr['id'] : '0';
+                    //区码
+                    $area_arr = Db::connect('db_wehub')->table('regionh')->field('id')->where('parent_id = '.$city.' and name = "'.$result['geocodes'][0]['district'].'"')->find();
+                    $area = $area_arr['id'] > 0 ? $area_arr['id'] : '0';
+                    $area_id = $area;
+                }
+            }
+        }else{
+            $area_id = $user_area_id['area_id'];
+        }
+        $area_where = '';
+        if(!empty($area_id)){
+            $area_where = ' ((g.goods_area = 0) or (g.goods_area <> 0 and g.goods_area like "%'.$area_id.'%"))';
+        }else{
+            $area_where = ' and ((g.goods_area = 0) ';
+        }
+//        $goods = $this->shop_goods_model->getSkuChannelGoods($where);
+        $goods = Db::connect('db_mini_mall')
+            ->field(['g.id','g.title','g.thumb','g.sale_pirce','g.marketprice','g.skuid','IFNULL(cs.channel_count, 0) as channel_count'])
+            ->table('ims_ewei_shop_goods')
+            ->alias('g')
+            ->LeftJoin('ims_bb_city_sku cs', 'cs.sku_id = g.skuid')
+            ->where($where)
+            ->where($area_where)
+            ->order('channel_count', 'desc')
+            ->limit(6)
+            ->select();
+        if(count($goods) < 5){
+            //获取当前二级分类下的商品
+            if(!empty($bb_cate2)){
+                $cate_where = [
+                    ['bb_cate2', '=', $bb_cate2],
+                    ['sup_id', '=', $sup_id],
+                    ['status', '=', 1],
+                    ['id', '<>', 68293],
+                ];
+                if($is_activity == 0){
+                    $cate_where[] = ['is_activity','=',0];
+                }
+                $cate_goods = $this->shop_goods_model->getCateGoods($cate_where, 5 - count($goods));
+                $goods = array_merge($goods, $cate_goods);
+            }
+        }
+        foreach ($goods as $k => $v){
+            $goods[ $k ]['thumb'] = imgSrc($v['thumb']);
+            $goods[ $k ]['channel_count'] = isset($v['channel_count']) ? $v['channel_count'] : 0;
+        }
+        sdk_return(['goods_lists'=>$goods], 1, '获取成功');
+    }
+
+    /**
+     * 没有查到扫码商品的时候的推荐列表
+     */
+    public function scanIndex(){
+        $param = $this->request->param();
+        $sup_id = !empty($param['sup_id']) ? $param['sup_id'] : sdk_return('',6,'缺少参数');
+        $openid = !empty($param['user_openid']) ? $param['user_openid'] : sdk_return('',6,'缺少参数');
+        $openid = is_sns($openid);
+
+        //是否是特殊用户
+        $manager_where = [
+            ['sup_id','=',$sup_id],
+            ['openid','=',$openid],
+            ['status','=',1],
+        ];
+        $is_special_user = Db::connect('db_mini_mall')->table('ims_yd_supplier_manager')->where($manager_where)->find();
+        $whereOr = '';
+        if(!empty($is_special_user)){
+            //需要展示
+//            $whereOr[] = ['a.is_activity','=',1];
+        }else{
+            //不需要展示
+//            $whereOr = ' and a.is_activity'.' = 0';
+        }
+        $whereOr = ' and a.is_activity'.' = 0';
+        //查询当前购买c端店铺的点位地址
+        $user_area_id = Db::connect('db_btj_new')->table('potential_customer')->field('area_id,address')->where('is_validity = 1 and xcx_openid = "'.$openid.'"')->find();
+//        echo Db::connect('db_btj_new')->getLastSql();exit;
+        if(empty($user_area_id['area_id'])){
+            //没有area_id,调用高德接口获取
+            if(!empty($user_area_id['address'])){
+                $url = "https://restapi.amap.com/v3/geocode/geo?output=JSON&key=ea30dd0bc2c1f965f535433fd54d292d&address=".preg_replace('# #','',$user_area_id['address']);
+// 执行请求
+                $ch = curl_init();
+                curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+                curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+                curl_setopt($ch, CURLOPT_URL, $url);
+                $data = curl_exec($ch);
+                curl_close($ch);
+                $result = json_decode($data, true);
+                $location = $result['geocodes'][0]['location'];
+                $loca = explode(',',$location);
+//                var_dump($location.$result['geocodes'][0]['province'].",".$result['geocodes'][0]['city'].",".$result['geocodes'][0]['district'].":".$i++);
+                if($location) {
+                    //省码
+                    $province_arr = Db::connect('db_wehub')->table('regionh')->field('id')->where('parent_id = 0 and name = "'.$result['geocodes'][0]['province'].'"')->find();
+                    $province = $province_arr['id'] > 0 ? $province_arr['id'] : '0';
+                    //市码
+                    $city_arr = Db::connect('db_wehub')->table('regionh')->field('id')->where('parent_id = '.$province.' and name = "'.mb_substr($result['geocodes'][0]['city'],0,mb_strlen($result['geocodes'][0]['city'])-1).'"')->find();
+                    $city = $city_arr['id'] > 0 ? $city_arr['id'] : '0';
+                    //区码
+                    $area_arr = Db::connect('db_wehub')->table('regionh')->field('id')->where('parent_id = '.$city.' and name = "'.$result['geocodes'][0]['district'].'"')->find();
+                    $area = $area_arr['id'] > 0 ? $area_arr['id'] : '0';
+                    $area_id = $area;
+                }
+            }
+        }else{
+            $area_id = $user_area_id['area_id'];
+        }
+        $area_where = '';
+        if(!empty($area_id)){
+            $area_where = ' ((a.goods_area = 0) or (a.goods_area <> 0 and a.goods_area like "%'.$area_id.'%"))';
+        }else{
+            $area_where = ' and (a.goods_area = 0) ';
+        }
+//        order by g.sales desc,g.createtime desc,g.id desc
+        $goods_data = Db::connect('db_mini_mall')->table('ims_ewei_shop_goods')->alias('a')->leftJoin('ims_yd_supplier_goods b','a.id = b.goods_id')->field('a.id,a.title,a.thumb,a.sale_pirce,a.marketprice')->where(' a.status = 1 and b.status = 1 and a.deleted = 0 and a.total > 0 and a.id <> 68293 and a.isrecommand = 1 '.$whereOr)->where($area_where)->order(['a.sales'=>'desc','a.createtime'=>'desc','a.id'=>'desc'])->limit(6)->select();
+        sdk_return($goods_data,0,'success');
+    }
+
+    /**
+     * 查询用户的心愿单列表
+     */
+    public function wishList(){
+        $param = $this->request->param();
+        $sup_id = !empty($param['sup_id']) ? $param['sup_id'] : sdk_return('',6,'缺少参数');//店铺ID
+        $user_openid = !empty($param['user_openid']) ? $param['user_openid'] : sdk_return('',6,'缺少参数');//用户openID
+        $is_sns = strstr($user_openid,'sns_wa_');
+        if(!$is_sns){
+            $user_openid =   'sns_wa_'.$user_openid;
+        }
+        $page = !empty($param['page']) ? $param['page'] : 1;//页码
+        $pageSize = 100000;
+        //查询用户的心愿单
+        $wish_where = [
+            ['sup_id','=',$sup_id],
+            ['open_id','=',$user_openid],
+            ['status','=',1],
+        ];
+        $wish_data = Db::connect('db_mini_mall')->table('ims_member_scan_wish')->field('id,bar_code,sup_id,result_type')->where($wish_where)->paginate($pageSize)->toArray();
+        $return_data = array();
+        if(!empty(count($wish_data['data']))){
+            $wish_data_d = $wish_data['data'];
+            foreach ($wish_data_d as $key => $value){
+                //查询商品信息
+                if($value['result_type'] == 2){
+                    //货比三家查询
+                    $goods_data = Db::connect('db_mini_mall')->query("SELECT id,goods_name,img from ims_bb_goods_item where code_list like '%{$value['bar_code']}%'");
+                    if(!empty(count($goods_data))){
+                        foreach ($goods_data as $one_goods){
+                            $channel_count = 0;
+                            $goods_item_id = $one_goods['id'];//商品itemID
+                            //根据itemID去查询sku，有可能会查询到多个
+                            $sku_data = Db::connect('db_mini_mall')->query("SELECT id,spec from ims_bb_sku where goods_id = {$goods_item_id}");
+                            if(!empty(count($sku_data))){
+                                foreach ($sku_data as $one_sku){
+                                    //根据sku查询报价数组
+                                    $channel_count_data = Db::connect('db_mini_mall')->query("SELECT a.price,b.c_name,a.price_avg as one_price from ims_bb_price_list as a left join ims_bb_channel as b on a.channel_id = b.id where sku_id = {$one_sku['id']}");
+                                    if(count($channel_count_data) > $channel_count){
+                                        $goods_name = $one_goods['goods_name'];//商品名称
+                                        $img = $one_goods['img'];//商品图片
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }elseif($value['result_type'] == 3){
+                    //京东库查询
+                    $jd_goods_data = Db::connect('db_ydhl')->query("SELECT goods_name,ben_img,price,trademark,spec from yd_base_goods where code = {$value['bar_code']}");
+                    if(!empty(count($jd_goods_data))){
+                        $goods_name = $jd_goods_data[0]['goods_name'];//商品名称
+                        $img = $jd_goods_data[0]['ben_img'];//商品图片
+                    }
+                }else{
+                    //没有
+                    $goods_name = '';
+                    $img = '';
+                }
+                //查询当前商品是否已经上架
+                $is_show = Db::connect('db_mini_mall')->table('ims_ewei_shop_goods')->alias('a')->leftJoin('ims_yd_supplier_goods b','a.id = b.goods_id')->where('a.status = 1 and a.total > 0 and b.status = 1 and a.deleted = 0 and b.supplier_id = '.$sup_id.' and goods_code = '.$value['bar_code'])->field('a.id')->find();
+                if(!empty($is_show)){
+                    //表示上架了
+                    $is_show = 1;
+                    $goods_id = $is_show['id'];
+                }else{
+                    $is_show = 0;
+                    $goods_id = 0;
+                }
+                $value['goods_name'] = $goods_name;
+                $value['img'] = $img;
+                $value['is_show'] = $is_show;
+                $value['goods_id'] = $goods_id;
+                $return_data[] = $value;
+            }
+        }
+        sdk_return($return_data,0,'success');
+    }
+
+    /**
+     * 查询节省金额
+     */
+    public function toSaveMoney(){
+        $param = $this->request->param();
+        $user_openid = !empty($param['user_openid']) ? $param['user_openid']: sdk_return('',6,'缺少参数');
+        $user_openid = is_sns($user_openid);
+        $sup_id = !empty($param['sup_id']) ? $param['sup_id']: sdk_return('',6,'缺少参数');
+        $data = Db::connect('db_mini_mall')->table('ims_ewei_shop_order')->where('openid = "'.$user_openid.'" and supplier_id = '.$sup_id.' and (status = 1 or status = 3)')->field('sum(goods_count) as goods_count,sum(money_save) as money_save')->find();
+        $return_data['goods_count'] = 0;
+        $return_data['money_save'] = 0;
+        if(!empty($data)){
+            $return_data['goods_count'] = !empty($data['goods_count']) ? $data['goods_count'] : 0;//商品数量
+            $return_data['money_save'] = !empty($data['money_save']) ? round($data['money_save']) : 0;//节省金额
+        }
+        sdk_return($return_data,0,'success');
+    }
+
+    /**
+     * 查询常购清单
+     */
+    public function likeGoods(){
+        $param = $this->request->param();
+        $user_openid = !empty($param['user_openid']) ? $param['user_openid']: sdk_return('',6,'缺少参数');
+        $user_openid = is_sns($user_openid);
+        $sup_id = !empty($param['sup_id']) ? $param['sup_id']: sdk_return('',6,'缺少参数');
+        $bb_cate2 = !empty($param['bb_cate2']) ? $param['bb_cate2']: 0;
+        $bb_cate2_where = '';
+        if(!empty($bb_cate2)){
+            $bb_cate2_where = 'and c.bb_cate2 = '.$bb_cate2;
+        }
+        $page = !empty($param['page']) ? $param['page']: 1;
+        $pageSize = 100000;
+        $data = Db::connect('db_mini_mall')->table('ims_ewei_shop_order_goods')->alias('a')->leftJoin('ims_ewei_shop_order b','a.orderid = b.id')->leftJoin('ims_ewei_shop_goods c','a.goodsid = c.id')->where('b.openid = "'.$user_openid.'" and b.supplier_id = '.$sup_id.' and (b.status = 1 or b.status = 3)'.$bb_cate2_where.' and a.total <> 0')->field('a.id,a.goodsid,b.openid,c.title,c.thumb,c.skuid,c.bb_start_count,c.bb_end_count,c.bb_step,c.salesreal,c.sale_pirce as marketprice')->group('a.goodsid')->paginate($pageSize)->toArray();
+        $return_data = array();
+        if(!empty($data['data'])){
+            $goods_data = $data['data'];
+            foreach ($goods_data as $key => $value){
+                $arr = null;
+//                $arr = Db::connect('db_mini_mall')->table('ims_ewei_shop_member_cart')->where('openid',$openids)->where('deleted',0)->where('goodsid',$v['id'])->find();
+                $arr = Db::connect('db_mini_mall')->table('ims_ewei_shop_member_cart')->where([['goodsid','=',$value['goodsid']],['openid','=',$user_openid],['deleted','=',0]])->find();
+                if(!empty($arr)){
+                    $value['cart_total'] = $arr['total'];
+                    $value['cart_id'] = $arr['id'];
+                }else{
+                    $value['cart_total'] = 0;
+                    $value['cart_id'] = 0;
+                }
+
+                //查询当前商品订购了多少次，多少个
+                $goods_sum_arr = Db::connect('db_mini_mall')->table('ims_ewei_shop_order_goods')->alias('a')->leftJoin('ims_ewei_shop_order b','a.orderid = b.id')->where('b.openid = "'.$user_openid.'" and b.supplier_id = '.$sup_id.' and (b.status = 1 or b.status = 3) and a.goodsid = '.$value['goodsid'].' and a.total <> 0')->field('count(a.id) as goods_sum,sum(total) as allTotal')->find();
+                $value['goods_sum'] = !empty($goods_sum_arr['goods_sum']) ? $goods_sum_arr['goods_sum'] : 0;//订购次数(已购3次)
+                $value['allTotal'] = !empty($goods_sum_arr['allTotal']) ? $goods_sum_arr['allTotal'] : 0;//订购数量（n件）
+                //查询商品报价价格
+                $hbsj_data = Db::connect('db_mini_mall')->table('ims_bb_price_list')->alias('a')->leftJoin('ims_bb_channel b','a.channel_id = b.id')->field('a.price,b.c_name')->where([['a.sku_id','=',$value['skuid']],['b.is_b2b','=',1]])->order('a.price','desc')->limit(4)->select();
+                $goods_channel_arr = array('0' => array('c_name'=>'','price'=>''), '1' => array('c_name'=>'','price'=>''), '2' => array('c_name'=>'','price'=>''), '3' => array('c_name'=>'','price'=>''), '4' => array('c_name'=>'','price'=>''));
+                if(!empty(count($hbsj_data))){
+                    foreach ($hbsj_data as $c_k => $c_v){
+                        $channel_arr = array();
+                        $channel_arr['c_name'] = $c_v['c_name'].'￥';
+                        $channel_arr['price'] = $c_v['price'];
+                        $goods_channel_arr[$c_k] = $channel_arr;
+                    }
+                }
+                $value['goods_channel_arr'] = $goods_channel_arr;
+                $value['goods_channel_res1'] = $goods_channel_arr[0]['c_name'].$goods_channel_arr[0]['price'].' '.$goods_channel_arr[1]['c_name'].$goods_channel_arr[1]['price'];
+                $value['goods_channel_res2'] = $goods_channel_arr[2]['c_name'].$goods_channel_arr[2]['price'].' '.$goods_channel_arr[3]['c_name'].$goods_channel_arr[3]['price'];
+                unset($goods_channel_arr);
+
+                $value['goods_channel_count'] = 0;
+                if(!empty($value['skuid'])){
+                    $hbsj_data_2 = Db::connect('db_mini_mall')->table('ims_bb_price_list')->alias('a')->leftJoin('ims_bb_channel b','a.channel_id = b.id')->field('a.price,b.c_name')->where([['a.sku_id','=',$value['skuid']],['b.is_b2b','=',1]])->order('a.price','desc')->count();
+                    $value['goods_channel_count'] = !empty($hbsj_data_2) ? $hbsj_data_2 : 0;
+                }
+
+                //查询规格
+                $value['bb_spec'] = '';
+                $one_goods_id = Db::connect('db_mini_mall')->table('ims_bb_sku')->where([['id','=',$value['skuid']]])->field('spec')->find();
+                if(!empty($one_goods_id)){
+                    $value['bb_spec'] = $one_goods_id['spec'];
+                }
+                //处理销量
+                $value['salesreal'] = $this->fix_sale_count($value['id'],$value['salesreal']);
+                //查询是否在售
+                $is_show = 1;//1：在售，0：缺货
+                $is_goods = Db::connect('db_mini_mall')->query("SELECT id FROM `ims_ewei_shop_goods` WHERE id in (select goods_id from ims_yd_supplier_goods WHERE supplier_id = {$sup_id} and `status` = 1) and `status` = 1 and total > 0 and deleted = 0 and id = {$value['goodsid']}");
+                if(empty(count($is_goods))){
+                    $is_show = 0;//1：在售，0：缺货
+                }
+                $value['is_show'] = $is_show;
+                $value['thumb'] = imgSrc($value['thumb']);
+                $value['thumb'] = !empty($value['thumb']) ? $value['thumb'] : 'https://mallm.yundian168.com/attachment/images/xiaochengxu/zw.png';
+                $return_data[] = $value;
+            }
+        }
+        sdk_return($return_data,0,'success');
+    }
+
+    /**
+     * 查询当前订单节省金额
+     */
+    public function orderSaveMoney(){
+        $param = $this->request->param();
+        $goods_ids = !empty($param['goods_ids']) ? $param['goods_ids'] : sdk_return('',6,'参数缺失');
+        $user_openid = !empty($param['user_openid']) ? $param['user_openid']: sdk_return('',6,'缺少参数');
+        $user_openid = is_sns($user_openid);
+        $sup_id = !empty($param['sup_id']) ? $param['sup_id']: sdk_return('',6,'缺少参数');
+//        $goods_data = json_decode($goods_ids,true);
+        $goods_data = $goods_ids;
+        $goods_id_arr = array();
+        $goods_id = '';
+        foreach ($goods_data as $k => $v){
+            $goods_id_arr[$v['goodsid']]['total'] = $v['total'];
+            $goods_id_arr[$v['goodsid']]['price'] = $v['marketprice'];
+            $goods_id .= ','.$v['goodsid'];
+        }
+        $goods_id = trim($goods_id,',');
+        $save_money = 0;
+        unset($goods_data);
+        if(!empty($goods_id)){
+            $goods_data = Db::connect('db_mini_mall')->query("SELECT id,skuid from ims_ewei_shop_goods where id in({$goods_id})");
+            if(!empty(count($goods_data))){
+                foreach ($goods_data as $key => $value){
+                    //根据skuid
+                    if(!empty($value['skuid'])){
+                        $max_price_arr = Db::connect('db_mini_mall')->query("SELECT max_price from ims_bb_city_sku where sku_id = {$value['skuid']}");
+                        $max_price = !empty($max_price_arr[0]['max_price']) ? $max_price_arr[0]['max_price'] : 0;
+                    }else{
+                        $max_price = 0;
+                    }
+
+                    if(!empty($goods_id_arr[$value['id']])){
+                        $total = $goods_id_arr[$value['id']]['total'];
+                        $one_price = $goods_id_arr[$value['id']]['price'];
+                    }else{
+                        $total = 0;
+                        $one_price = 0;
+                    }
+                    $max_price_all = $max_price * $total;
+                    $order_goods_price = $one_price * $total;
+                    if($max_price_all > $order_goods_price){
+                        $save_money = $max_price_all - $order_goods_price + $save_money;
+                    }
+                }
+            }
+        }
+        //
+        $data = Db::connect('db_mini_mall')->table('ims_ewei_shop_order')->where('openid = "'.$user_openid.'" and supplier_id = '.$sup_id.' and (status = 1 or status = 3)')->field('sum(goods_count) as goods_count,sum(money_save) as money_save')->find();
+        $money_save_all = 0;
+        if(!empty($data)){
+            $money_save_all = !empty($data['money_save']) ? $data['money_save'] : 0;//节省金额
+        }
+        $return_data['order_save_money'] = round($save_money,2);//当前订单节省
+        $return_data['money_save_all'] = round($money_save_all);//历史订单节省
+        sdk_return($return_data,0,'success');
+    }
+
+    /**
+     * 查询常购清单分类
+     */
+    public function likeCate(){
+        $param = $this->request->param();
+        $user_openid = !empty($param['user_openid']) ? $param['user_openid']: sdk_return('',6,'缺少参数');
+        $user_openid = is_sns($user_openid);
+        $sup_id = !empty($param['sup_id']) ? $param['sup_id']: sdk_return('',6,'缺少参数');
+        $data = Db::connect('db_mini_mall')->table('ims_ewei_shop_order_goods')->alias('a')->leftJoin('ims_ewei_shop_order b','a.orderid = b.id')->leftJoin('ims_ewei_shop_goods c','a.goodsid = c.id')->where('b.openid = "'.$user_openid.'" and b.supplier_id = '.$sup_id.' and (b.status = 1 or b.status = 3) and c.bb_cate2 <> 0 and a.total <> 0')->field('a.id,a.goodsid,b.openid,c.bb_cate2,count(c.bb_cate2) as cate_num')->group('c.bb_cate2')->select();
+        $cate_data = array();
+        $all_cate_num = 0;
+        //查询分类名称
+        if(!empty(count($data))){
+            foreach ($data as $key => $value){
+                //查询分类名称
+                if(!empty($value['bb_cate2'])){
+                    $cate_name_arr = Db::connect('db_mini_mall')->table('ims_bb_cate_bb')->where('id = '.$value['bb_cate2'])->field('c_name')->find();
+                    $cate_name = $cate_name_arr['c_name'];
+                }else{
+                    $cate_name = '';
+                }
+                $value['cate_name'] = $cate_name;
+                $all_cate_num = $all_cate_num + $value['cate_num'];
+                $cate_data[] = $value;
+            }
+        }
+        $all = [
+            "id" => 0,
+            "goodsid" => 0,
+            "openid" => '',
+            "bb_cate2" => 0,
+            "cate_num" => $all_cate_num,
+            "cate_name" => "全部"
+        ];
+        array_unshift($cate_data,$all);
+        sdk_return($cate_data,0,'success');
+    }
+
+    /**
+     * 虚假销量
+     * @param $id
+     * @param $real_sale_count
+     * @return false|float|string
+     */
+    private function fix_sale_count($id,$real_sale_count){
+        $res_sale_count = $real_sale_count;
+        if ($id <> 68293) {
+            $res_sale_count = round(($real_sale_count * 10 + date('d') * 100) / 4)+date('H');
+        }
+        return $res_sale_count;
+    }
+}

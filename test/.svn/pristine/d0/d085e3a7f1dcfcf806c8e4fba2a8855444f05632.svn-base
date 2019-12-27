@@ -1,0 +1,17 @@
+<?php  
+$apiHome = dirname(__FILE__) . DIRECTORY_SEPARATOR;  
+include_once $apiHome.'TopClient.php';  
+include_once $apiHome.'RequestCheckUtil.php';  
+function autoload($name){  
+	global $apiHome;  
+	if(false !== strpos($name,'\\')){
+	  $name = strstr($name, '\\', true);
+	}
+
+	$filename = __DIR__."/request/".$name.".php";
+	if(is_file($filename)) {
+		include_once $filename;
+		return;
+	}   
+}  
+spl_autoload_register('autoload');

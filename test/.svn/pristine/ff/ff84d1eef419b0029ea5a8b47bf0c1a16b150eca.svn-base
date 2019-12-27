@@ -1,0 +1,113 @@
+<?php
+/**
+ * 对象存储
+ * Created by zsl
+ * Author: zsl
+ * Date: 2019-08-14
+ * Time: 10:23
+ */
+
+namespace library;
+
+require_once __DIR__ . '/../../vendor/aliyun_oss/autoload.php';
+use OSS\OssClient;
+use OSS\Core\OssException;
+use think\Exception;
+
+
+class Oss
+{
+    private static $key_id;     // 阿里云Access Key ID
+    private static $key_secret; // 阿里云Access Key Secret
+    private static $endpoint;   // 阿里云oss 外网地址endpoint
+    private static $isCName;    // 是否绑定自定义解析
+
+    /**
+     * Oss constructor.
+     * @param $key_id
+     * @param $key_secret
+     * @param $endpoint
+     * @param bool $isCName
+     */
+    public function __construct($key_id,$key_secret,$endpoint,$isCName = false)
+    {
+        self::$key_id = $key_id;
+        self::$key_secret = $key_secret;
+        self::$endpoint = $endpoint;
+        self::$key_id = $key_id;
+        self::$isCName = $isCName;
+
+    }
+
+    // 阿里云OSS
+    public static function ali_oss()
+    {
+        try {
+            $ossClient = new OssClient(self::$key_id,self::$key_secret,self::$endpoint,self::$isCName);
+        } catch (OssException $e) {
+            return $e->getMessage();
+        }
+
+        return $ossClient;
+    }
+
+    /**
+     * 处理base64图片数据
+     * @param $base64 [base64图片数据]
+     * @param string $img_name [保存图片文件名]
+     * @return array
+     */
+    public static function process_base64($base64,$img_name = '')
+    {
+        $data = explode(',',$base64);
+        trace($data,'api');
+        unset($base64);
+        if (count($data) !== 2){
+            return ['status' => 0,'msg'=>'文件格式错误'];
+        }
+
+        if (preg_match('/^(data:\s*image\/(\w+);base64)/', $data[0], $result)){
+            $type = $result[2];
+            if(!in_array($type,array('jpeg','jpg','gif','bmp','png'))){
+                return ['status' => 0,'msg'=>'文件格式不在允许范围内'];
+            }
+            $image_name = !empty($img_name) ? $img_name. '.' . $result[2] : md5(uniqid()) . '.' . $result[2];
+            $image_path = "./upload/images/";
+
+            // 创建指定目录
+            $create_folders_res = self::create_folders($image_path);
+            if (!$create_folders_res) {
+                return  ['status'=>0,'msg'=>'创建目录失败'];
+            }
+
+            $image_file = $image_path . $image_name;
+            //服务器文件存储路径
+            try {
+                if (file_put_contents($image_file, base64_decode($data[1]))) {
+                    return['status'=>1, 'msg'=>'成功', 'data'=>['name' => $image_name, 'path' => $image_path]];
+                } else {
+                    return['status'=>0, 'msg'=> '文件保存失败'];
+                }
+            }catch ( Exception $e){
+                $msg = $e->getMessage();
+                return ['status'=>0,'msg'=>$msg];
+            }
+        }
+        return ['status'=>0,'msg'=>'文件格式错误'];
+    }
+
+    // 创建目录
+    public static function create_folders($dir)
+    {
+        return is_dir($dir) or (self::create_folders(dirname($dir)) and mkdir($dir, 0777));
+    }
+
+    // 七牛OSS
+    public static function qiniu_oss(){}
+
+    // 腾讯云OSS
+    public static function tencent_oss(){}
+
+    // 百度云OSS
+    public static function baidu_oss(){}
+}

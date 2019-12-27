@@ -1,0 +1,864 @@
+<?php
+/**
+ * Created by originThink
+ * Author: wenming
+ * Date: 2019.11.1
+ */
+
+namespace app\api\controller;
+require_once __DIR__ . '/../../../vendor/erp_sdk/TopSdk.php';
+
+use app\api\controller\BaseController;
+use app\api\model\ydxq\GoodsCode as GoodsModel;
+use app\api\model\ydhl\ParityProduct as ParityProductModel;
+use app\api\model\btjnew\Sign as SignModel;
+
+use think\Db;
+use think\Debug;
+use think\Exception;
+use think\Loader;
+
+class Goodsinfo extends BaseController {
+
+    private $ydxq_goods_model;
+    private $appKey;
+    private $secretKey;
+    private $serverUrl;
+    private $sessionKey;
+
+    public function __construct(){
+        //error_reporting(E_ALL & ~E_NOTICE);
+        header("Access-Control-Allow-Origin: *");
+        header("Access-Control-Allow-Methods: POST, GET");
+
+        parent::__construct();
+
+        $this->ydxq_goods_model = new GoodsModel(); //云店星球数据源
+        $this->ydhl_parity_product_model = new ParityProductModel(); //XX数据源
+        $this->btj_sign_model = new SignModel(); //btj数据源
+
+        $this->appKey = '48985457';
+        $this->secretKey = '78dft745wer5678gh78989qwe79897';
+        $this->serverUrl = 'http://erp18.jetm3.com/erpApi/api.php';
+        $this->sessionKey = '17f8989er4899qwr89789456wt489789';
+    }
+
+    //根据skuid获取商品所有的sku信息
+    public function SkuList(){
+        $request = $this->request_param;
+        $sku_id = $request['sku_id'];
+
+        if (empty($sku_id)) {
+            echo json_encode(array('code' => 'error', 'msg' => '非法请求'));
+            exit;
+        }
+
+        $result_data = array();
+        $result_data1 = array();
+        $result_data2 = array();
+        $sql = "select goods_id from ims_bb_sku where id = {$sku_id} ";
+        $iteminfo = $this->ydxq_goods_model->querySql($sql);
+        if($iteminfo){
+            $goods_id = $iteminfo[0]['goods_id'];
+            $sql = "select id,spec from ims_bb_sku where goods_id = {$goods_id} ";
+            $iteminfo = $this->ydxq_goods_model->querySql($sql);
+            if($iteminfo){
+                foreach($iteminfo as $list){
+                    if($list['id'] == $sku_id){
+                        $result_data1[] = array('sku_id' => $list['id'], 'spec' => $list['spec']);
+                    }else{
+                        $result_data2[] = array('sku_id' => $list['id'], 'spec' => $list['spec']);
+                    }
+                }
+            }
+        }
+
+        $result_data = array_merge($result_data1, $result_data2);
+        echo json_encode(array('code' => 'ok', 'result_data' => $result_data));
+    }
+
+    //根据id获取商品item信息 hbsj_item_id与goods_id
+    public function itemInfo(){
+        $request = $this->request_param;
+        $sku_id = $request['sku_id'];
+        if(empty($sku_id)){
+            echo json_encode(array('msg' => '非法请求'));
+            exit;
+        }
+        $erp_stock = $this->request->param('erp_stock');
+
+        $sql = "select a.goods_id,a.sku_img,a.sku_name,b.cate_bb1,b.cate_bb2,c.c_name as cate_name1,d.c_name as cate_name2,e.sale_pirce,e.marketprice,e.total,a.code_list_pro,e.isrecommand,e.bb_end_count,e.bb_step,
+                b.content,b.unit,a.unit_count,a.unit_name,f.b_name,f.score as brand_score,a.sku_score,a.bd_price_count from ims_bb_sku a 
+                inner join (select id,cate_bb1,cate_bb2,content,unit from ims_bb_goods_item ) b on a.goods_id = b.id
+                left join (select id,c_name from ims_bb_cate_bb) c on b.cate_bb1 = c.id 
+                left join (select id,c_name from ims_bb_cate_bb) d on b.cate_bb2 = d.id 
+                left join (select skuid,sale_pirce,marketprice,total,isrecommand,bb_end_count,bb_step,brand_id from ims_ewei_shop_goods ) e on e.skuid = a.id 
+                left join (select id,b_name,score from ims_bb_brand) f on e.brand_id = f.id 
+                where a.id = {$sku_id}  limit 1 ";
+        $iteminfo = $this->ydxq_goods_model->querySql($sql);
+        if($iteminfo){
+            if($erp_stock == 'need'){
+                //获取ERP库存
+                /*$goods_id = $iteminfo[0]['goods_id'];
+                $client = new \TopClient();
+                $client->appKey     =  $this->appKey;
+                $client->secretKey  =  $this->secretKey;
+                $client->gatewayUrl  = $this->serverUrl;
+                $request = new \GoodsTotalQueryRequest();
+
+                $request->setPrdNo('60454');
+                $request->setPageIndex(1);
+                $request->setPageSize(100);
+                $result = $client->execute($request,$this->sessionKey);
+                print_r($result);*/
+            }
+
+            $code_list_pro = $iteminfo[0]['code_list_pro'];
+            $code_list = explode(',',$code_list_pro);
+            $iteminfo[0]['code_list_num'] = count($code_list);//条码数量
+            $iteminfo[0]['sale_spec'] =  $iteminfo[0]['unit_count'].$iteminfo[0]['unit_name'];//销售规格
+
+
+            echo json_encode(array('code' => 'ok', 'result_data' => $iteminfo[0]));
+        }else{
+            echo json_encode(array('code' => 'error', 'msg' => '数据异常'));
+        }
+    }
+
+    //所有销售规格
+    public function allskuInfo(){
+        $request = $this->request_param;
+        $sku_id = $request['sku_id'];
+
+        if (empty($sku_id)) {
+            echo json_encode(array('code' => 'error', 'msg' => '非法请求'));
+            exit;
+        }
+
+        $sql = "select goods_id from ims_bb_sku where id = {$sku_id} ";
+        $iteminfo = $this->ydxq_goods_model->querySql($sql);
+        if($iteminfo){
+            $goods_id = $iteminfo[0]['goods_id'];
+        }else{
+            echo json_encode(array('code' => 'error', 'msg' => '商品未上架'));
+            exit;
+        }
+
+        $sql = "select id,sku_name,spec,is_used,bd_price_count from ims_bb_sku where goods_id = {$goods_id}";
+        $iteminfo = $this->ydxq_goods_model->querySql($sql);
+        if($iteminfo){
+            echo json_encode(array('code' => 'ok', 'result_data' => $iteminfo));
+        }else{
+            echo json_encode(array('code' => 'ok', 'result_data' => array()));
+        }
+
+    }
+
+    //报价信息获取
+    public function quotedPriceInfo(){
+        $request = $this->request_param;
+        $sku_id = $request['sku_id'];
+
+        if(empty($sku_id)){
+            echo json_encode(array('code' => 'error', 'msg' => '非法请求'));
+            exit;
+        }
+        $channel_count = '';//报价数
+        $min_price = '';
+        $max_price = '';
+        $price_scope = '';//价格带
+        $hbsj_sku_id = '';//货比三家id
+        $priceRatio = '';
+        $sale_pirce = 0;//社区派报价
+        $unit_count = 0;//单位数量
+
+        $sql = "select b.channel_count,b.min_price,b.max_price,a.hbsj_sku_id,a.unit_count from ims_bb_sku a
+                left join (select sku_id,channel_count,min_price,max_price  from ims_bb_city_sku ) b on a.id = b.sku_id
+                where a.id = {$sku_id}  limit 1 ";
+        $iteminfo = $this->ydxq_goods_model->querySql($sql);
+        if($iteminfo){
+            $channel_count = $iteminfo[0]['channel_count'];//报价数
+            $min_price = $iteminfo[0]['min_price'];
+            $max_price = $iteminfo[0]['max_price'];
+            $price_scope = $min_price . '-' . $max_price;//价格带
+            $hbsj_sku_id = $iteminfo[0]['hbsj_sku_id'];//货比三家id
+            $unit_count = $iteminfo[0]['unit_count'];//单位数量
+        }
+
+        $sql = "select sale_pirce from ims_ewei_shop_goods where skuid = {$sku_id} ";
+        $iteminfo = $this->ydxq_goods_model->querySql($sql);
+        if($iteminfo){
+            $sale_pirce = $iteminfo[0]['sale_pirce'];
+        }else{
+            echo json_encode(array('code' => 'error', 'msg' => '商品未上架'));
+            exit;
+        }
+
+        if(!empty($hbsj_sku_id)){
+            $sql = "select priceRatio from bsj_parity_product where id = {$hbsj_sku_id}";
+            $iteminfo = $this->ydhl_parity_product_model->querySql($sql);
+            if($iteminfo){
+                $priceRatio = $iteminfo[0]['priceRatio'];
+            }
+        }
+
+        $price_list = array();
+        $price_channel = array();//渠道报价
+
+        if($unit_count == 0){
+            $price_channel[] = array('channel' => '社区派', 'price' => $sale_pirce, 'price_1' => 0, 'color' => 'red');
+        }else{
+            $price_channel[] = array('channel' => '社区派', 'price' => $sale_pirce, 'price_1' => round(($sale_pirce / $unit_count), 2), 'color' => 'red');
+        }
+
+        $sql = "select a.channel_id,a.price,b.c_name from ims_bb_price_list a 
+                left join (select id,c_name from ims_bb_channel) b on a.channel_id = b.id
+                where a.sku_id = {$sku_id} group by a.channel_id,a.price,b.c_name";
+        $iteminfo = $this->ydxq_goods_model->querySql($sql);
+        if($iteminfo){
+            foreach($iteminfo as $list){
+                if(array_key_exists($list['price'],$price_list)){
+                    $price_list[$list['price']]++;
+                }else{
+                    $price_list[$list['price']] = 1;
+                }
+                if($unit_count == 0){
+                    $price_channel[] = array('channel' => $list['c_name'], 'price' => $list['price'], 'price_1' => 0, 'color' => '');
+                }else{
+                    $price_channel[] = array('channel' => $list['c_name'], 'price' => $list['price'], 'price_1' => round(($list['price'] / $unit_count),2), 'color' => '');
+                }
+
+            }
+        }
+
+        /*计算报价最多的报价，如果金额相同，则取价格最低的*/
+        arsort($price_list);
+        $max_price_count = reset($price_list);//最多报价次数
+        foreach($price_list as $k => $v){
+            if($v != $max_price_count){
+                unset($price_list[$k]);
+            }
+        }
+        ksort($price_list);
+        reset($price_list);
+        $max_count_price = key($price_list);//报价最多价格
+
+        $result_data = array(
+            'channel_count' => $channel_count, 'price_scope' => $price_scope, 'priceRatio' => $priceRatio,
+            'max_count_price' => $max_count_price, 'channel_price' => $price_channel
+        );
+
+        echo json_encode(array('code' => 'ok', 'result_data' => $result_data));
+    }
+
+    //销售数据获取
+    public function saleDataInfo(){
+        $request = $this->request_param;
+        $sku_id = $request['sku_id'];
+        $date1 = $request['date1'];
+        $date2 = $request['date2'];
+        $potential_id = $request['potential_id'];//点位id
+
+        $date1_times = strtotime($date1);//开始时间(时间戳)
+        $date2_times = strtotime($date2);//结束时间(时间戳)
+
+        if (empty($sku_id)) {
+            echo json_encode(array('code' => 'error', 'msg' => '非法请求'));
+            exit;
+        }
+
+        $where = "";
+        $where_a = "";
+        if(!empty($date1) && !empty($date2)){
+            $where = " and createtime >= {$date1_times} and  createtime <= {$date2_times} ";
+            $where_a = " and a.createtime >= {$date1_times} and  a.createtime <= {$date2_times} ";
+        }
+
+        $browse_num = 0;//浏览数量
+        $share_num = 0;//分享数量
+        $potential_num = 0;//下单点位数
+        $order_num = 0;//订单数
+        $sale_num = 0;//销售量
+        $average_num = 0;//单均购
+        $cus_repeat_num = 0;//复购客户数
+        $sale_total = 0;//销售金额
+        $change_num = 0;//划单数
+
+        $sql = "select id from ims_ewei_shop_goods where skuid = {$sku_id} ";
+        $iteminfo = $this->ydxq_goods_model->querySql($sql);
+        if($iteminfo){
+            $goods_id = $iteminfo[0]['id'];
+        }else{
+            echo json_encode(array('code' => 'error', 'msg' => '商品未上架'));
+            exit;
+        }
+
+        //浏览数量
+        $sql = "select count(1) as count from ims_member_action_log where log_type = '8' " . $where . " and log_info = '" . '{"goodsid":' . $goods_id . ' }' . "' ";
+        $iteminfo = $this->ydxq_goods_model->querySql($sql);
+        if($iteminfo){
+            $browse_num = $iteminfo[0]['count'];//浏览数量
+        }
+        //分享数量
+        $sql = "select count(1) as count from ims_member_action_log where log_type = '9'  " . $where . " and log_info = '" . $goods_id . "' ";
+        $iteminfo = $this->ydxq_goods_model->querySql($sql);
+        if($iteminfo){
+            $share_num = $iteminfo[0]['count'];//分享数量
+        }
+        //下单点位数
+        $potential_openid_list = array();
+        $sql = "select a.openid from ims_ewei_shop_order_goods a
+                left join (select id,openid,`status`,supplier_id from ims_ewei_shop_order) b on a.orderid = b.id
+                where a.goodsid = {$goods_id} and b.`status` != '-1' and b.supplier_id = 461 " . $where_a . "
+                group by a.orderid ";
+        $iteminfo = $this->ydxq_goods_model->querySql($sql);
+        if($iteminfo){
+            foreach($iteminfo as $list){
+                $potential_openid_list[$list['openid']] = $list['openid'];
+            }
+        }
+        if(count($potential_openid_list) > 0){
+            $potential_list = array();
+
+            $sql = "select id,parent_id,xcx_openid from potential_customer
+                    where xcx_openid in ('" . str_replace(",","','", implode(',', $potential_openid_list)) . "')";
+                //is_validity = 1 and
+            $iteminfo = $this->btj_sign_model->querySql($sql);
+            if($iteminfo){
+                foreach($iteminfo as $list){
+                    if($list['parent_id'] == 0){
+                        $potential_list[$list['id']] = $list['id'];
+                    }else{
+                        $potential_list[$list['parent_id']] = $list['parent_id'];
+                    }
+                }
+            }
+            $potential_num = count($potential_list);//下单点位数
+        }
+        //订单数
+        $sql = "select count(1) as count from ims_ewei_shop_order a
+                left join (select orderid,goodsid from ims_ewei_shop_order_goods) b on a.id = b.orderid
+                where a.`status` != '-1' and b.goodsid = {$goods_id} and a.supplier_id = 461 " . $where_a . "  ";
+        $iteminfo = $this->ydxq_goods_model->querySql($sql);
+        if($iteminfo){
+            $order_num = $iteminfo[0]['count'];//订单数
+        }
+        //销售量 销售额
+        $sql = "select sum(a.total) as `total`,sum(a.price) as price from ims_ewei_shop_order_goods a
+                left join (select id,`status`,supplier_id from ims_ewei_shop_order) b on a.orderid = b.id
+                where a.goodsid = {$goods_id} and b.`status` != '-1' and b.supplier_id = 461 " . $where_a;
+        $iteminfo = $this->ydxq_goods_model->querySql($sql);
+        if($iteminfo){
+            $sale_num = $iteminfo[0]['total'];//销售量
+            $sale_total = $iteminfo[0]['price'];//销售金额
+        }
+        //单均购
+        $average_num = $order_num == 0 ? 0 : (round(($sale_num / $order_num), 2));
+        //复购客户数
+        $sql = "select a.openid,count(1) as count from ims_ewei_shop_order_goods a
+                left join (select id,openid,`status`,supplier_id from ims_ewei_shop_order) b on a.orderid = b.id
+                where a.goodsid = {$goods_id} and b.`status` != '-1' and b.supplier_id = 461 " . $where_a . "
+                group by a.openid having(count(1)) > 1 ";
+        $iteminfo = $this->ydxq_goods_model->querySql($sql);
+        if($iteminfo){
+            $cus_repeat_num = count($iteminfo);//复购客户数
+        }
+        //划单数
+        $sql = "select count(1) as count from (
+                    select 1 from ims_member_order_change_log where goods_id = {$goods_id}  " . $where . " group by ordersn 
+                ) a ";
+        $iteminfo = $this->ydxq_goods_model->querySql($sql);
+        if($iteminfo){
+            $change_num = $iteminfo[0]['count'];//划单数
+        }
+
+        //点位下销售数据
+        $is_potential = 1;//点位传入标识
+        $potential_browse_num = 0;//点位浏览数量
+        $potential_share_num = 0;//点位分享数量
+        $potential_order_num = 0;//点位订单数
+        $potential_sale_num = 0;//点位销售量
+        $potential_average_num = 0;//点位单均购
+        $potential_openid = array();//点位所有的openid
+        if(!empty($potential_id)){//查询点位下部分销售数据
+            $sql = "select xcx_openid from  potential_customer where id = {$potential_id}
+                    union 
+                    select xcx_openid from  potential_customer where parent_id = {$potential_id} ";
+            $iteminfo = $this->btj_sign_model->querySql($sql);
+            if($iteminfo){
+                foreach($iteminfo as $list){
+                    if(!empty($list['xcx_openid'])){
+                        $potential_openid[] = $list['xcx_openid'];
+                    }
+                }
+            }
+            //点位浏览数量
+            $sql = "select count(1) as count from ims_member_action_log where log_type = '8'  " . $where . " and log_info = '" . '{"goodsid":' . $goods_id . ' }' . "' and openid in ('" . str_replace(",", "','", implode(',',$potential_openid)) . "') ";
+            $iteminfo = $this->ydxq_goods_model->querySql($sql);
+            if($iteminfo){
+                $potential_browse_num = $iteminfo[0]['count'];//浏览数量
+            }
+            //点位分享数量
+            $sql = "select count(1) as count from ims_member_action_log where log_type = '9'  " . $where . " and log_info = '" . $goods_id . "' ". " and openid in ('" . str_replace(",", "','", implode(',',$potential_openid)) . "') ";
+            $iteminfo = $this->ydxq_goods_model->querySql($sql);
+            if($iteminfo){
+                $potential_share_num = $iteminfo[0]['count'];//分享数量
+            }
+            //点位订单数
+            $sql = "select count(1) as count from ims_ewei_shop_order a
+                left join (select orderid,goodsid from ims_ewei_shop_order_goods) b on a.id = b.orderid
+                where a.`status` != '-1' and b.goodsid = {$goods_id} and a.supplier_id = 461 " . " and a.openid in ('" . str_replace(",", "','", implode(',',$potential_openid)) . "') " . " 
+                " . $where_a . "
+                group by a.id ";
+            $iteminfo = $this->ydxq_goods_model->querySql($sql);
+            if($iteminfo){
+                $potential_order_num = $iteminfo[0]['count'];//订单数
+            }
+            //点位销售量
+            $sql = "select sum(a.total) as `total` from ims_ewei_shop_order_goods a
+                    left join (select id,`status`,openid,supplier_id from ims_ewei_shop_order) b on a.orderid = b.id
+                    where a.goodsid = {$goods_id} and b.`status` != '-1' and b.supplier_id = 461  and b.openid in ('" . str_replace(",", "','", implode(',',$potential_openid)) . "') " . $where_a;
+            $iteminfo = $this->ydxq_goods_model->querySql($sql);
+            if($iteminfo){
+                $potential_sale_num = $iteminfo[0]['total'];//销售量
+                $potential_sale_num = $potential_sale_num == '' ? 0 : $potential_sale_num;
+            }
+            //点位单均购
+            $potential_average_num = $potential_order_num == 0 ? 0 : (round(($potential_sale_num / $potential_order_num), 2));
+        }else{
+            $is_potential = 0;
+        }
+
+        $result_data = array(
+            'browse_num' => $browse_num, 'share_num' => $share_num, 'potential_num' => $potential_num,
+             'order_num' => $order_num, 'sale_num' => $sale_num, 'average_num' => $average_num, 'change_num' => $change_num,
+             'cus_repeat_num' => $cus_repeat_num, 'sale_total' => $sale_total, 'potential_browse_num' => $potential_browse_num,
+             'potential_share_num' => $potential_share_num, 'potential_order_num' => $potential_order_num,
+             'potential_sale_num' => $potential_sale_num, 'potential_average_num' => $potential_average_num,'is_potential' => $is_potential,
+        );
+        echo json_encode(array('code' => 'ok', 'result_data' => $result_data));
+    }
+
+    //供应商信息
+    public function supplierDataInfo(){
+        $request = $this->request_param;
+        $sku_id = $request['sku_id'];//sku_id
+        $opt_id = $request['opt_id'];//1、品牌 2、单品
+
+        if (empty($sku_id)) {
+            echo json_encode(array('code' => 'error', 'msg' => '非法请求'));
+            exit;
+        }
+
+        $sql = "select id,brand_id from ims_ewei_shop_goods where skuid = {$sku_id} ";
+        $iteminfo = $this->ydxq_goods_model->querySql($sql);
+        if($iteminfo){
+            $goods_id = $iteminfo[0]['id'];
+            $brand_id = $iteminfo[0]['brand_id'];
+        }else{
+            echo json_encode(array('code' => 'error', 'msg' => '商品未上架'));
+            exit;
+        }
+
+        $where = '';
+        if($opt_id == 1){//品牌
+            $goods_id_list = '';
+            $sql = "select id from ims_ewei_shop_goods where brand_id = {$brand_id} ";
+            $iteminfo = $this->ydxq_goods_model->querySql($sql);
+            if($iteminfo){
+                foreach($iteminfo as $list){
+                    $goods_id_list[] = $list['id'];
+                }
+            }
+
+            $where = " where pin_hao in ('".str_replace(',',"','", implode($goods_id_list))."') ";
+        }else if($opt_id == 2){//单品
+            $where = " where pin_hao = '{$goods_id}' ";
+        }else{
+            $where = " where 1 = 2 ";
+        }
+
+        $result_data = array();
+        //先查出对应商品的bar_code，然后去ims_bb_scan_bar_code_buy表里按照bar_code查询
+        $sql = "select gong_yin_shang,dan_jia from ims_ydhl_stock {$where} group by gong_yin_shang,dan_jia ";
+        $iteminfo = $this->ydxq_goods_model->querySql($sql);
+        if($iteminfo){
+            foreach($iteminfo as $list){
+                $result_data[] = array('gong_yin_shang' => $list['gong_yin_shang'], 'dan_jia' => $list['dan_jia']);
+            }
+        }
+
+        echo json_encode(array('code' => 'ok', 'result_data' => $result_data));
+    }
+
+    //采销流水
+    public function operateflow(){
+        $request = $this->request_param;
+        $sku_id = $request['sku_id'];//sku_id
+        $opt_id = $request['opt_id'];//0全部  1 采购 2销售
+
+        $salelist = array();//销售流水
+        $operateflowlist = array();//采销流水
+        $useridlist = array();//userid列表
+        $potentiallist = array();//点位列表
+
+        if (empty($sku_id)) {
+            echo json_encode(array('code' => 'error', 'msg' => '非法请求'));
+            exit;
+        }
+
+        $sql = "select id from ims_ewei_shop_goods where skuid = {$sku_id} ";
+        $iteminfo = $this->ydxq_goods_model->querySql($sql);
+        if($iteminfo){
+            $goods_id = $iteminfo[0]['id'];
+        }else{
+            echo json_encode(array('code' => 'error', 'msg' => '商品未上架'));
+            exit;
+        }
+
+        if($opt_id == 0 || $opt_id == 1){
+            //采购流水
+            $sql = "select dan_jia,shu_liang,create_time,gong_yin_shang from ims_ydhl_stock where pin_hao = '{$goods_id}' order by create_time desc ";
+            $iteminfo = $this->ydxq_goods_model->querySql($sql);
+            if($iteminfo){
+                foreach($iteminfo as $list){
+                    $operateflowlist[] = array('type' => 'caigou', 'r_name' => $list['gong_yin_shang'], 'createtime' => date('Y-m-d H:i:s', $list['create_time']), 'num' => $list['shu_liang'], 'price' => $list['dan_jia']);
+                }
+            }
+        }
+
+        if($opt_id == 0 || $opt_id == 2){
+            //销售流水
+            $sql = "select a.realprice,a.total,a.createtime,b.openid from ims_ewei_shop_order_goods a
+                left join (select id,`status`,openid,supplier_id from ims_ewei_shop_order) b on a.orderid = b.id
+                where a.goodsid = {$goods_id} and b.`status` != '-1' and b.supplier_id = 461 order by a.createtime desc  ";
+            $iteminfo = $this->ydxq_goods_model->querySql($sql);
+            if($iteminfo){
+                foreach($iteminfo as $list){
+                    $useridlist[$list['openid']] = $list['openid'];
+                }
+                $salelist = $iteminfo;
+            }
+
+            $sql = "select user_name,xcx_openid from potential_customer
+                where xcx_openid in ('" . str_replace(",","','", implode(',', $useridlist)) . "')";
+            $iteminfo = $this->btj_sign_model->querySql($sql);
+            if($iteminfo){
+                foreach($iteminfo as $list){
+                    $potentiallist[$list['xcx_openid']] = $list['user_name'];
+                }
+            }
+
+            if(is_array($salelist)){
+                foreach($salelist as $list){
+                    if(isset($potentiallist[$list['openid']])){
+                        $operateflowlist[] = array('type' => 'xiaoshou', 'r_name' => $potentiallist[$list['openid']], 'createtime' => date('Y-m-d H:i:s', $list['createtime']), 'num' => $list['total'], 'price' => $list['realprice']);
+                    }else{
+                        $operateflowlist[] = array('type' => 'xiaoshou', 'r_name' => '', 'createtime' => date('Y-m-d H:i:s', $list['createtime']), 'num' => $list['total'], 'price' => $list['realprice']);
+                    }
+                }
+            }
+        }
+
+        echo json_encode(array('code' => 'ok', 'result_data' => $operateflowlist));
+    }
+
+    //线形图表
+    public function reportSale(){
+        $request = $this->request_param;
+        if(isset($request['sku_id'])){
+            $sku_id = $request['sku_id'];//sku_id
+        }else{
+            echo json_encode(array('code' => 'error', 'msg' => '请输入sku_id'));
+            exit;
+        }
+
+        if(isset($request['date1'])){
+            $date1 = $request['date1'];//开始时间
+        }else{
+            echo json_encode(array('code' => 'error', 'msg' => '请输入date1'));
+            exit;
+        }
+
+        if(isset($request['date2'])){
+            $date2 = $request['date2'];//结束时间
+        }else{
+            echo json_encode(array('code' => 'error', 'msg' => '请输入date1'));
+            exit;
+        }
+
+        $date1_times = strtotime($date1);//开始时间(时间戳)
+        $date2_times = strtotime($date2);//结束时间(时间戳)
+
+        if (empty($sku_id) || empty($date1) || empty($date2)) {
+            echo json_encode(array('code' => 'error', 'msg' => '非法请求'));
+            exit;
+        }
+
+        $sql = "select id from ims_ewei_shop_goods where skuid = {$sku_id} ";
+        $iteminfo = $this->ydxq_goods_model->querySql($sql);
+        if($iteminfo){
+            $goods_id = $iteminfo[0]['id'];
+        }else{
+            echo json_encode(array('code' => 'error', 'msg' => '商品未上架'));
+            exit;
+        }
+
+        //时间横轴、价格、订单数量、点位数、销售量
+        $datelist = array();//时间区别存入数组
+        $salelist = array();//销售流水
+        $potentialnumlist = array();//点位数量列表
+        $potential_list = array();//点位列表
+        $sql = "select id,parent_id,xcx_openid from potential_customer";
+        $iteminfo = $this->btj_sign_model->querySql($sql);
+        if($iteminfo){
+            foreach($iteminfo as $list){
+                if($list['parent_id'] == 0){
+                    $potential_list[$list['xcx_openid']] = $list['id'];
+                }else{
+                    $potential_list[$list['xcx_openid']] = $list['parent_id'];
+                }
+            }
+        }
+
+        $daydiff = ceil(($date2_times - $date1_times) / (60 * 60 * 24));
+        for($i = 0; $i < $daydiff; $i++){
+            $rangdate = date("Y-m-d",strtotime("+" . $i . " day",strtotime($date1)));
+            $datelist[] = $rangdate;
+            $salelist[$rangdate] = array('price' => 0, 'ordernum' => 0, 'potentialnum' => 0, 'salenum' => 0);
+        }
+
+        $sql = "select a.realprice,a.total,a.createtime,b.openid from ims_ewei_shop_order_goods a
+                left join (select id,`status`,openid,supplier_id from ims_ewei_shop_order) b on a.orderid = b.id
+                where a.goodsid = {$goods_id} and a.createtime >= {$date1_times} and a.createtime <= {$date2_times} 
+                and b.`status` != '-1' and b.supplier_id = 461 order by a.createtime asc ";
+        $iteminfo = $this->ydxq_goods_model->querySql($sql);
+        if($iteminfo){
+            foreach($iteminfo as $list){
+                $create_date = date('Y-m-d', $list['createtime']);
+                if(isset($potential_list[$list['openid']])){
+                    $potentialnumlist[$create_date][$potential_list[$list['openid']]] = 1;
+                }
+
+                if(isset($salelist[$create_date])){
+                    $salelist[$create_date]['price'] = $list['realprice'];//写入单价
+                    $salelist[$create_date]['ordernum'] += 1;//累加单数
+                    $salelist[$create_date]['salenum'] += $list['total'];//累加销售数量
+                }
+            }
+        }
+
+        $datedata = array();//日期数组
+        $pricedata = array();//价格数组
+        $ordernumdata = array();//订单数量数组
+        $saledata = array();//订单销量数组
+        $potentialdata = array();//点位数组
+        $maxprice = 0;//最大单价
+        $maxdata = 0;//最大数据
+        foreach($salelist as $create_date => $list){
+            $potentialnum = count($potentialnumlist[$create_date]);
+            $datedata[] = $create_date;
+            $pricedata[] = (float)$list['price'];
+            $ordernumdata[] = $list['ordernum'];
+            $saledata[] = $list['salenum'];
+            $potentialdata[] = $potentialnum;
+            if($list['price'] > $maxprice){
+                $maxprice = $list['price'];
+            }
+            if($list['ordernum'] > $maxdata){
+                $maxdata = $list['ordernum'];
+            }
+            if($list['salenum'] > $maxdata){
+                $maxdata = $list['salenum'];
+            }
+            if($potentialnum > $maxdata){
+                $maxdata = $potentialnum;
+            }
+        }
+
+        echo json_encode(array('code' => 'ok', 'result_data' => array('datedata' => $datedata, 'pricedata' => $pricedata, 'ordernumdata' => $ordernumdata,
+            'saledata' => $saledata, 'potentialdata' => $potentialdata, 'maxprice' => $maxprice, 'maxdata' => $maxdata,
+        )));
+    }
+
+    //订单占比
+    public function orderRatio(){
+        $request = $this->request_param;
+        if(isset($request['sku_id'])){
+            $sku_id = $request['sku_id'];//sku_id
+        }else{
+            echo json_encode(array('code' => 'error', 'msg' => '请输入sku_id'));
+            exit;
+        }
+
+        if(isset($request['date1'])){
+            $date1 = $request['date1'];//开始时间
+        }else{
+            echo json_encode(array('code' => 'error', 'msg' => '请输入date1'));
+            exit;
+        }
+
+        if(isset($request['date2'])){
+            $date2 = $request['date2'];//结束时间
+        }else{
+            echo json_encode(array('code' => 'error', 'msg' => '请输入date1'));
+            exit;
+        }
+
+        $date1_times = strtotime($date1);//开始时间(时间戳)
+        $date2_times = strtotime($date2);//结束时间(时间戳)
+        $date2_times += (3600 * 24);
+
+        if (empty($sku_id) || empty($date1) || empty($date2)) {
+            echo json_encode(array('code' => 'error', 'msg' => '非法请求'));
+            exit;
+        }
+
+        $where = " a.createtime >= {$date1_times} and a.createtime <= {$date2_times} and ";
+
+        $sql = "select id from ims_ewei_shop_goods where skuid = {$sku_id} ";
+        $iteminfo = $this->ydxq_goods_model->querySql($sql);
+        if($iteminfo){
+            $goods_id = $iteminfo[0]['id'];
+        }else{
+            echo json_encode(array('code' => 'error', 'msg' => '商品未上架'));
+            exit;
+        }
+
+        //时间横轴
+        $datelist = array();//时间区别存入数组
+        $result_data = array();//返回数据
+        $daydiff = ceil(($date2_times - $date1_times) / (60 * 60 * 24));
+        for($i = 0; $i < $daydiff; $i++){
+            $rangdate = date("Y-m-d",strtotime("-" . $i . " day",strtotime($date2)));
+            $datelist[$rangdate] = array('date' => $rangdate, 'orderNumAllList' => array(), 'orderNumList' => array(), 'salenum' => 0, 'price' => 0);
+        }
+
+        $sql = "select a.goodsid,a.realprice,a.total,a.createtime,b.ordersn from ims_ewei_shop_order_goods a
+                left join (select id,`status`,openid,supplier_id,ordersn from ims_ewei_shop_order) b on a.orderid = b.id
+                where " . $where . " b.`status` != '-1' and b.supplier_id = 461 order by a.createtime desc  ";
+        $iteminfo = $this->ydxq_goods_model->querySql($sql);
+        if($iteminfo){
+            foreach($iteminfo as $list){
+                $create_date = date('Y-m-d', $list['createtime']);
+                $datelist[$create_date]['orderNumAllList'][$list['ordersn']] = $list['ordersn'];
+                if($list['goodsid'] == $goods_id){
+                    $datelist[$create_date]['orderNumList'][$list['ordersn']] = $list['ordersn'];
+                    $datelist[$create_date]['salenum'] += $list['total'];
+                    $datelist[$create_date]['price'] = $list['realprice'];
+                }
+            }
+        }
+
+        $rowlist1 = array();
+        $rowlist2 = array();
+        $rowlist3 = array();
+        $rowlist4 = array();
+        foreach($datelist as $list){
+            $rowlist1[] = $list['date'];
+            if(count($list['orderNumAllList']) == 0){
+                $rowlist2[] = 0;
+            }else{
+                $rowlist2[] = (round(count($list['orderNumList']) / count($list['orderNumAllList']),  2) * 100) . '%,' . count($list['orderNumList']) . '/'. count($list['orderNumAllList']);
+            }
+            $rowlist3[] = $list['salenum'];
+            $rowlist4[] = $list['price'];
+        }
+
+        $result_data = array($rowlist1, $rowlist2, $rowlist3, $rowlist4);
+        echo json_encode(array('code' => 'ok', 'result_data' => $result_data));
+    }
+
+    //划单占比
+    public function orderChange(){
+        $request = $this->request_param;
+        if(isset($request['sku_id'])){
+            $sku_id = $request['sku_id'];//sku_id
+        }else{
+            echo json_encode(array('code' => 'error', 'msg' => '请输入sku_id'));
+            exit;
+        }
+
+        if(isset($request['date1'])){
+            $date1 = $request['date1'];//开始时间
+        }else{
+            echo json_encode(array('code' => 'error', 'msg' => '请输入date1'));
+            exit;
+        }
+
+        if(isset($request['date2'])){
+            $date2 = $request['date2'];//结束时间
+        }else{
+            echo json_encode(array('code' => 'error', 'msg' => '请输入date1'));
+            exit;
+        }
+
+        $date1_times = strtotime($date1);//开始时间(时间戳)
+        $date2_times = strtotime($date2);//结束时间(时间戳)
+        $date2_times += (3600 * 24);
+
+        if (empty($sku_id) || empty($date1) || empty($date2)) {
+            echo json_encode(array('code' => 'error', 'msg' => '非法请求'));
+            exit;
+        }
+
+        $where = " a.createtime >= {$date1_times} and a.createtime <= {$date2_times} and ";
+
+        $sql = "select id from ims_ewei_shop_goods where skuid = {$sku_id} ";
+        $iteminfo = $this->ydxq_goods_model->querySql($sql);
+        if($iteminfo){
+            $goods_id = $iteminfo[0]['id'];
+        }else{
+            echo json_encode(array('code' => 'error', 'msg' => '商品未上架'));
+            exit;
+        }
+
+        //时间横轴
+        $datelist = array();//时间区别存入数组
+        $result_data = array();//返回数据
+        $daydiff = ceil(($date2_times - $date1_times) / (60 * 60 * 24));
+        for($i = 0; $i < $daydiff; $i++){
+            $rangdate = date("Y-m-d",strtotime("-" . $i . " day",strtotime($date2)));
+            $datelist[$rangdate] = array('date' => $rangdate, 'orderNum' => 0, 'orderChangeNum' => 0, 'orderChangeTotal' => 0, 'orderEmptyNum' => 0,);
+        }
+
+        $sql = "select a.createtime,b.ordersn,a.total,d.count_new from ims_ewei_shop_order_goods a 
+                left join (select id,`status`,openid,supplier_id,ordersn from ims_ewei_shop_order) b on a.orderid = b.id 
+                left join (select max(id) as id,ordersn,goods_id from ims_member_order_change_log group by ordersn) c on b.ordersn = c.ordersn and a.goodsid = c.goods_id
+                left join (select id,ordersn,goods_id,count_new from ims_member_order_change_log) d on c.id = d.id
+                where a.goodsid = {$goods_id} and " . $where . " b.`status` != '-1' and b.supplier_id = 461 
+                order by a.createtime desc  ";
+        $iteminfo = $this->ydxq_goods_model->querySql($sql);
+        if($iteminfo){
+            foreach($iteminfo as $list){
+                $create_date = date('Y-m-d', $list['createtime']);
+                $datelist[$create_date]['orderNum'] += 1;
+                if($list['count_new'] != ''){
+                    $datelist[$create_date]['orderChangeNum'] += 1;
+                    $datelist[$create_date]['orderChangeTotal'] += ($list['total'] - $list['count_new']);
+                }
+                if($list['total'] > 0 && $list['count_new'] == '0'){
+                    $datelist[$create_date]['orderEmptyNum'] += 1;
+                }
+            }
+        }
+
+        $rowlist1 = array();
+        $rowlist2 = array();
+        $rowlist3 = array();
+        $rowlist4 = array();
+        foreach($datelist as $list){
+            $rowlist1[] = $list['date'];
+            if($list['orderNum'] == 0){
+                $rowlist2[] = 0;
+            }else{
+                $rowlist2[] = (round($list['orderChangeNum'] / $list['orderNum'],  2) * 100) . '%,' . $list['orderChangeNum'] . '/'. $list['orderNum'];
+            }
+            $rowlist3[] = $list['orderEmptyNum'];
+            $rowlist4[] = $list['orderChangeTotal'];
+        }
+
+        $result_data = array($rowlist1, $rowlist2, $rowlist3, $rowlist4);
+        echo json_encode(array('code' => 'ok', 'result_data' => $result_data));
+    }
+}

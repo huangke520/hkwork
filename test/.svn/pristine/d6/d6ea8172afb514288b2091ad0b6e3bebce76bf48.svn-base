@@ -1,0 +1,274 @@
+<?php
+
+namespace app\api\controller;
+
+use app\api\model\ydxq\BbSku;
+use app\api\model\ydxq\ShopGoods as ShopGoodsModel;
+use app\api\model\ydxq\BbSku as BbSkuModel;
+use app\api\model\ydxq\BbGoodsItem as BbGoodsItemModel;
+use app\api\model\ydxq\BbBrand as BbBrandModel;
+use app\api\model\ydxq\BbCateBb as BbCateBbdModel;
+use app\api\model\ydxq\BbPriceList as BbPriceListModel;
+use app\api\model\ydxq\BbChannel as BbChannelModel;
+use app\api\model\ydxq\ShopMemberCart as ShopMemberCartModel;
+use app\api\model\ydxq\GoodsFlashSale as GoodsFlashSaleModel;
+
+use think\Db;
+
+class Goods extends BaseController
+{
+    private $shop_goods_model;
+    private $bb_sku_model;
+    private $bb_goods_item_model;
+    private $bb_brand_model;
+    private $bb_cate_bb_model;
+    private $bb_price_list_model;
+    private $bb_channel_model;
+    private $bb_member_cart_model;
+    private $goods_flash_sale_model;
+
+    public function __construct()
+    {
+        parent::__construct();
+        $this->shop_goods_model = new ShopGoodsModel();
+        $this->bb_sku_model = new BbSkuModel();
+        $this->bb_goods_item_model = new BbGoodsItemModel();
+        $this->bb_brand_model = new BbBrandModel();
+        $this->bb_cate_bb_model = new BbCateBbdModel();
+        $this->bb_price_list_model = new BbPriceListModel();
+        $this->bb_channel_model = new BbChannelModel();
+        $this->bb_member_cart_model = new ShopMemberCartModel();
+        $this->goods_flash_sale_model = new GoodsFlashSaleModel();
+    }
+
+    //商品详情接口
+    public function detail(){
+        $param = $this->request_param;
+        $sup_id = !empty($param['sup_id']) ? $param['sup_id'] : 461;//店铺ID。默认461
+
+        if(!isset($param['goodsid']) || !isset($param['openid'])){
+            sdk_return('', 0, '参数缺失');
+        }
+        $goods_id = intval($param['goodsid']);
+        $openid = $param['openid'];
+
+        //获取商品基本参数
+        $goods_info = $this->shop_goods_model->getInfoPro(['id'=>$goods_id], ['title', 'thumb', 'salesreal', 'sale_pirce', 'skuid', 'brand_id', 'bb_cate1', 'bb_cate2', 'content', 'bb_start_count', 'bb_end_count', 'bb_step', 'is_activity', 'marketprice']);
+        if(empty($goods_info)){
+            sdk_return('', 0 , '获取商品详情错误');
+        }
+
+        //判断当前商品针对当前人是否可以展示分享
+        $is_share = 1;
+        if($goods_info['is_activity'] != 0){
+            $manager_where = [
+                ['sup_id','=',$sup_id],
+                ['openid','=',$openid],
+                ['status','=',1],
+            ];
+            $is_special_user = Db::connect('db_mini_mall')->table('ims_yd_supplier_manager')->where($manager_where)->find();
+            if(empty($is_special_user)){
+                //表示没有权限分享
+                $is_share = 0;
+            }
+        }
+
+        //商品详情处理
+        $content = unserialize($goods_info['content']);
+        $goods_deltail = [];
+        if(is_array($content)){
+            foreach ($content as $k => $v){
+                $goods_deltail[]['url'] = $v;
+            }
+        }
+
+        //获取当前商品在购物车中的数量
+        $cart_info = $this->bb_member_cart_model->getInfo(['goodsid'=>$goods_id, 'openid'=>$openid, 'deleted'=>0]);
+        $cart['cart_total'] = 0;
+        if($cart_info){
+            $cart = [
+                'cart_id'       =>  $cart_info['id'],
+                'cart_total'    =>  $cart_info['total'],
+            ];
+        }
+
+        //获取是否已经限时抢购
+        $flash_sale_where = [
+            ['endtime', '>', time()],
+            ['status', '=', 1],
+            ['goods_id', '=', $goods_id]
+        ];
+        $flash_sale_info = $this->goods_flash_sale_model->getInfo($flash_sale_where);
+        if($flash_sale_info){
+            $return_flash_sale = [
+                'flash_sale_endtime'       =>  $flash_sale_info['endtime'] - time(),
+                'is_flash_sale' =>  1,
+            ];
+        }else{
+            $return_flash_sale = [
+                'is_flash_sale' =>  0,
+            ];
+        }
+
+        //获取商品sku, 如果不存在sku，只返回基本参数
+        $sku_info = $this->bb_sku_model->getInfoPro(['id'=>$goods_info['skuid']], ['unit_name','unit_count','goods_id', 'spec']);
+        if(empty($sku_info)){
+            $return_data = [
+                'title'         =>  $goods_info['title'],//标题
+                'sale_pirce'    =>  $goods_info['sale_pirce'],//销售价格
+                'marketprice'   =>  $goods_info['marketprice'],//划线价
+                'cart_price'    =>  number_format($cart_info['total'] * $goods_info['sale_pirce'], 2),//购物车价格
+                'suggest_price' =>  '暂无数据',//建议零售价
+                'thumb'         =>  imgSrc($goods_info['thumb']),//图片缩略图
+                'max_buy_number'=>  $goods_info['bb_end_count'] == 0 ? '不限购' : $goods_info['bb_end_count'],//每单限购数量, 0不限购
+                'bb_start_count'=>  empty($goods_info['bb_start_count']) ? 1 : $goods_info['bb_start_count'],//起订数量
+                'bb_end_count'  =>  $goods_info['bb_end_count'],//商品限购数，0不限制
+                'goods_deltail' =>  $goods_deltail,
+                'bb_step'       =>  $goods_info['bb_step'],
+                'is_share'       =>  $is_share,
+            ];
+            $return_data = array_merge($return_data, $cart, $return_flash_sale);
+
+            sdk_return($return_data, 1, '获取商品详情成功');
+        }
+
+        //获取商品item
+        $item_info = $this->bb_goods_item_model->getInfoPro(['id'=>$sku_info['goods_id']], ['content', 'out_date']);
+
+        //获取品牌
+        $brand_info = $this->bb_brand_model->getInfo(['id'=>$goods_info['brand_id']]);
+
+        //获取分类信息
+        $cate_where = [
+            ['id', 'in', [$goods_info['bb_cate1'], $goods_info['bb_cate2']]]
+        ];
+        $cates = $this->bb_cate_bb_model->getAllListPro($cate_where, ['id', 'c_name']);
+        $cate_tmp = [];
+        foreach ($cates as $k => $v){
+            $cate_tmp[ $v['id'] ] = $v['c_name'];
+        }
+
+        $salesreal = empty($goods_info['salesreal']) ? 10 : $goods_info['salesreal'];
+        $goods_id_arr = str_split($goods_id);//数字转换为数组，销售数量处理
+        $spec_arr = explode('/', $sku_info['spec']);//规格处理
+
+        //当前单位
+        $sale_unit = $sku_info['unit_count'] == 1 ? $sku_info['unit_name'] : $spec_arr[ count($spec_arr) - 1 ];
+
+        $return_data = [
+                'title'         =>  $goods_info['title'],//标题
+                'sale_pirce'    =>  $goods_info['sale_pirce'],//销售价格
+                'marketprice'   =>  $goods_info['marketprice'],//划线价
+                'cart_price'    =>  number_format($cart_info['total'] * $goods_info['sale_pirce'], 2),//购物车价格
+                'suggest_price' =>  '暂无数据',//建议零售价
+                'spec'          =>  $sku_info['spec'],//规格
+                'thumb'         =>  imgSrc($goods_info['thumb']),//图片缩略图
+                'salesreal'     =>  $salesreal * 10 + $goods_id_arr[ count($goods_id_arr) - 1 ],
+                'avg_price'     =>  number_format($goods_info['sale_pirce'] / $sku_info['unit_count'], 2),//单价
+                //'unit'          =>  $spec_arr[ count($spec_arr) - 1 ],//最小单位
+                'unit'          =>  $sku_info['unit_name'],//最小单位
+                'sale_unit'     =>  $sale_unit,//销售单位
+                'max_buy_number'=>  $goods_info['bb_end_count'] == 0 ? '不限购' : $goods_info['bb_end_count'],//每单限购数量, 0不限购
+                'brand_id'      =>  $goods_info['brand_id'],
+                'brand_name'    =>  $brand_info['b_name'],//品牌名称
+                'cate1'         =>  isset($cate_tmp[ $goods_info['bb_cate1'] ]) ? $cate_tmp[ $goods_info['bb_cate1'] ] : '暂无分类',//商品一级分类
+                'cate2'         =>  isset($cate_tmp[ $goods_info['bb_cate2'] ]) ? $cate_tmp[ $goods_info['bb_cate2'] ] : '暂无分类',//商品二级分类
+                'one_cate'      =>  $goods_info['bb_cate1'],//一级分类id
+                'category_id'   =>  $goods_info['bb_cate2'],//二级分类id
+                'out_date'      =>  $item_info['out_date'],//保质期
+                'bb_start_count'=>  empty($goods_info['bb_start_count']) ? 1 : $goods_info['bb_start_count'],//起订数量
+                'bb_end_count'  =>  $goods_info['bb_end_count'],//商品限购数，0不限制
+                'bb_step'       =>  $goods_info['bb_step'],//步时
+                'goods_deltail' =>  $goods_deltail,
+                'is_share'      =>  $is_share,
+                /*'goods_deltail' =>  [
+                    ['url'=>'https://oss.yundian168.com/ydxq/img/system/goods/lqchs/20190824/3c64ab685a9216a6d83418fa31eba035.jpeg'],
+                    ['url'=>'https://oss.yundian168.com/ydxq/img/system/goods/lqchs/20190824/3c64ab685a9216a6d83418fa31eba035.jpeg'],
+                ],*/
+        ];
+        $return_data = array_merge($return_data, $cart, $return_flash_sale);
+
+        //获取商品报价
+        $price_list = $this->bb_price_list_model->getAllListPro(['sku_id'=>$goods_info['skuid']], ['id', 'price', 'channel_id', 'date', 'price_avg']);
+
+        $channel_id = array_column($price_list, 'channel_id');
+        if(!empty($channel_id)){
+            $channel_where = [
+                ['id', 'in', $channel_id],
+                ['is_b2b', '=', 1]
+            ];
+            $channels = $this->bb_channel_model->getAllListPro($channel_where, ['id', 'c_name']);
+            $channels_tmp = [];
+            foreach ($channels as $k => $v){
+                $channels_tmp[ $v['id'] ] = $v['c_name'];
+            }
+            foreach ($price_list as $k => $v){
+                if(isset($channels_tmp[ $v['channel_id'] ])){
+                    $price_list[ $k ]['channel_name'] = $channels_tmp[ $v['channel_id'] ];
+                }else{
+                    unset($price_list[ $k ]);
+                }
+            }
+        }
+
+        $price_list = [
+            'lists'         =>  $price_list,
+            'count'         =>  count($price_list)
+        ];
+        //报价信息
+        $return_data['price_list'] = $price_list;
+
+        sdk_return($return_data, 1, '获取商品详情成功');
+    }
+
+    //推荐商品列表
+    public function recommends(){
+        $param = $this->request_param;
+        if(!isset($param['goodsid'])){
+            sdk_return('', 0, '参数缺失');
+        }
+
+        $goods_id = intval($param['goodsid']);
+
+        //获取商品基本参数
+        $goods_info = $this->shop_goods_model->getInfoPro(['id'=>$goods_id], ['brand_id', 'sup_id', 'bb_cate2', 'skuid']);
+        if(empty($goods_info) || empty($goods_info['skuid'])){
+            sdk_return([], 1, '获取成功');
+        }
+        //获取skuid的报价数量
+        $where = [
+            ['g.brand_id', '=', $goods_info['brand_id']],
+            ['g.sup_id', '=', $goods_info['sup_id']],
+            ['g.id', '<>', $goods_id],
+            ['g.status', '=', 1],
+            ['g.is_activity', '=', 0]
+        ];
+        $goods = $this->shop_goods_model->getSkuChannelGoods($where);
+
+        if(count($goods) < 5){
+            //获取当前二级分类下的商品
+            if(!empty($goods_info['bb_cate2'])){
+                $cate_where = [
+                    ['bb_cate2', '=', $goods_info['bb_cate2']],
+                    ['sup_id', '=', $goods_info['sup_id']],
+                    ['id', '<>', $goods_id],
+                    ['status', '=', 1],
+                    ['is_activity', '=', 0]
+                ];
+
+                $cate_goods = $this->shop_goods_model->getCateGoods($cate_where, 5 - count($goods));
+
+                $goods = array_merge($goods, $cate_goods);
+            }
+        }
+
+        foreach ($goods as $k => $v){
+            $goods[ $k ]['thumb'] = imgSrc($v['thumb']);
+
+            $goods[ $k ]['channel_count'] = isset($v['channel_count']) ? $v['channel_count'] : 0;
+        }
+        sdk_return(['goods_lists'=>$goods], 1, '获取成功');
+        //var_dump($goods);
+    }
+
+}

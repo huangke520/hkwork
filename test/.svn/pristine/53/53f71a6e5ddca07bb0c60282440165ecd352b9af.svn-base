@@ -1,0 +1,125 @@
+<?php
+class VipPaymentRequest
+{
+	private $order_id;
+	
+	private $order_type;
+	
+	private $member;
+	
+	private $store_no;
+	
+	private $payment_money;
+	
+	private $payment_integral;
+	
+	private $give_integral;
+	
+	private $remark;
+	
+	private $apiParas = array();
+	
+	public function setOrderId($order_id)
+	{
+		$this->order_id = $order_id;
+		$this->apiParas["order_id"] = $order_id;
+	}
+
+	public function getOrderId()
+	{
+		return $this->order_id;
+	}
+	
+	public function setOrderType($order_type)
+	{
+		$this->order_type = $order_type;
+		$this->apiParas["order_type"] = $order_type;
+	}
+
+	public function getOrderType()
+	{
+		return $this->order_type;
+	}
+	
+	public function setMember($member)
+	{
+		$this->member = $member;
+		$this->apiParas["member"] = $member;
+	}
+
+	public function getMember()
+	{
+		return $this->member;
+	}
+
+	public function setStoreNo($store_no)
+	{
+		$this->store_no = $store_no;
+		$this->apiParas["store_no"] = $store_no;
+	}
+
+	public function getStoreNo()
+	{
+		return $this->store_no;
+	}
+
+	public function setPaymentMoney($payment_money)
+	{
+		$this->payment_money = $payment_money;
+		$this->apiParas["payment_money"] = $payment_money;
+	}
+
+	public function getPaymentMoney()
+	{
+		return $this->payment_money;
+	}
+	
+	public function setPaymentIntegral($payment_integral)
+	{
+		$this->payment_integral = $payment_integral;
+		$this->apiParas["payment_integral"] = $payment_integral;
+	}
+
+	public function getPaymentIntegral()
+	{
+		return $this->payment_integral;
+	}
+	
+	public function setGiveIntegral($give_integral)
+	{
+		$this->give_integral = $give_integral;
+		$this->apiParas["give_integral"] = $give_integral;
+	}
+
+	public function getGiveIntegral()
+	{
+		return $this->give_integral;
+	}
+	
+	public function setRemark($remark)
+	{
+		$this->remark = $remark;
+		$this->apiParas["remark"] = $remark;
+	}
+
+	public function getRemark()
+	{
+		return $this->remark;
+	}
+	
+	public function getApiMethodName()
+	{
+		return "shanhai.vip.payment";
+	}
+	
+	public function getApiParas()
+	{
+		return $this->apiParas;
+	}
+	
+	public function check()
+	{
+		//RequestCheckUtil::checkNotNull($this->page_index,"page_index");
+		//RequestCheckUtil::checkNotNull($this->page_size,"page_size");
+	}
+}

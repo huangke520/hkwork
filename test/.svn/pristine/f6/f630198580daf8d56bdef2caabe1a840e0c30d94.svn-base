@@ -1,0 +1,111 @@
+<?php
+class VipQueryRequest
+{
+	/** 
+	 * 会员编号 
+	 **/
+	private $member;
+	
+	private $mobile;
+	
+	private $member_name;
+	
+	/** 
+	 * 最后修改时间
+	 **/
+	private $modify_datetime;
+	
+	/** 
+	 * 页码 当前页数 从1开始
+	 **/
+	private $page_index;
+	
+	/** 
+	 * 每页大小 最大不能超过100
+	 **/
+	private $page_size;
+	
+	private $apiParas = array();
+	
+	public function setMember($member)
+	{
+		$this->member = $member;
+		$this->apiParas["member"] = $member;
+	}
+
+	public function getMember()
+	{
+		return $this->member;
+	}
+	
+	public function setMobile($mobile)
+	{
+		$this->mobile = $mobile;
+		$this->apiParas["mobile"] = $mobile;
+	}
+
+	public function getMobile()
+	{
+		return $this->mobile;
+	}
+	
+	public function setMemberName($member_name)
+	{
+		$this->member_name = $member_name;
+		$this->apiParas["member_name"] = $member_name;
+	}
+
+	public function getMemberName()
+	{
+		return $this->member_name;
+	}
+
+	public function setModifyDatetime($modify_datetime)
+	{
+		$this->modify_datetime = $modify_datetime;
+		$this->apiParas["modify_datetime"] = $modify_datetime;
+	}
+
+	public function getModifyDatetime()
+	{
+		return $this->modify_datetime;
+	}
+
+	public function setPageIndex($page_index)
+	{
+		$this->page_index = $page_index;
+		$this->apiParas["page_index"] = $page_index;
+	}
+
+	public function getPageIndex()
+	{
+		return $this->page_index;
+	}
+
+	public function setPageSize($page_size)
+	{
+		$this->paymnet_time = $page_size;
+		$this->apiParas["page_size"] = $page_size;
+	}
+
+	public function getPageSize()
+	{
+		return $this->page_size;
+	}
+	
+	public function getApiMethodName()
+	{
+		return "shanhai.vip.query";
+	}
+	
+	public function getApiParas()
+	{
+		return $this->apiParas;
+	}
+	
+	public function check()
+	{
+		RequestCheckUtil::checkNotNull($this->page_index,"page_index");
+		RequestCheckUtil::checkNotNull($this->page_size,"page_size");
+	}
+}

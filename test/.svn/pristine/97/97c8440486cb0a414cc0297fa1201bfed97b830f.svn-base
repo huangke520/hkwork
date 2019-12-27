@@ -1,0 +1,1321 @@
+<?php
+
+namespace app\api\controller;
+
+use app\api\model\ydxq\BbSku;
+use app\api\model\ydxq\ShopGoods as ShopGoodsModel;
+use app\api\model\ydxq\BbSku as BbSkuModel;
+use app\api\model\ydxq\BbGoodsItem as BbGoodsItemModel;
+use app\api\model\ydxq\BbBrand as BbBrandModel;
+use app\api\model\ydxq\BbCateBb as BbCateBbdModel;
+use app\api\model\ydxq\BbPriceList as BbPriceListModel;
+use app\api\model\ydxq\BbChannel as BbChannelModel;
+use app\api\model\ydxq\ShopMemberCart as ShopMemberCartModel;
+
+use think\Db;
+
+class Wash extends BaseController
+{
+    private $shop_goods_model;
+    private $bb_sku_model;
+    private $bb_goods_item_model;
+    private $bb_brand_model;
+    private $bb_cate_bb_model;
+    private $bb_price_list_model;
+    private $bb_channel_model;
+    private $bb_member_cart_model;
+
+    private $ydxq_test = [
+        // 数据库类型
+        'type'            => 'mysql',
+        // 服务器地址
+        'hostname'        => 'rm-2zeap44sq13kgg34p8o.mysql.rds.aliyuncs.com',
+        // 用户名
+        'username'        => 'ydxq_test',
+        // 密码
+        'password'        => 'Ydxq1234',
+        // 数据库名称
+        'database'        => 'ydxq_test',//ydxq_test
+    ];
+
+    public function __construct()
+    {
+        parent::__construct();
+        $this->shop_goods_model = new ShopGoodsModel();
+        $this->bb_sku_model = new BbSkuModel();
+        $this->bb_goods_item_model = new BbGoodsItemModel();
+        $this->bb_brand_model = new BbBrandModel();
+        $this->bb_cate_bb_model = new BbCateBbdModel();
+        $this->bb_price_list_model = new BbPriceListModel();
+        $this->bb_channel_model = new BbChannelModel();
+        $this->bb_member_cart_model = new ShopMemberCartModel();
+    }
+
+    public function wash_sku(){
+
+        set_time_limit(0);
+        ini_set('memory_limit', '512M');
+
+        $time = time();
+
+        $db_config = $this->ydxq_test;
+
+        //$db_config = 'db_mini_mall';
+
+        //ims_bb_sku
+        $where = [
+            ['id', '>', 100080001],
+            ['id', '<', 100090000]
+        ];
+
+        $items = DB::connect($db_config)->field('id,goods_name,img,unit,content')->table('ims_bb_goods_item')->where($where)->select();
+
+        $items_ids = array_column($items, 'id');
+
+        $skus = DB::connect($db_config)->field(['unit_count','code_list_new','goods_id','id'])->table('ims_bb_sku')->where([['goods_id', 'in', $items_ids]])->select();
+
+        $sku_tmp_arr = [];
+        foreach ($skus as $k => $v){
+            $sku_tmp_arr[ $v['goods_id'] ][] = $v;
+        }
+
+        foreach ($items as $k => $v){
+            //获取当前item的所有规格
+            if(isset( $sku_tmp_arr[ $v['id'] ] )){
+                $sku = $sku_tmp_arr[ $v['id'] ];
+
+                $unit_sku_id = 0;
+                $code_list_temp_str = '';
+                foreach ($sku as $sk => $sv){
+                    if($sv['code_list_new'] != 'null' && $sv['code_list_new'] != '' && $sv['code_list_new'] != '无条形码'){
+                        $code_list_temp_str .= $sv['code_list_new'] . ',';
+                    }
+                    if($sv['unit_count'] == 1){
+                        $unit_sku_id = $sv['id'];
+                    }
+                }
+
+                $code_list_temp_arr = implode(',', array_unique(explode(',', trim($code_list_temp_str, ','))));
+
+                //如果当前item存在单品规格,更新
+                if($unit_sku_id != 0){
+                    $update_data = [
+                        'code_list_temp'        =>  $code_list_temp_arr
+                    ];
+                    DB::connect($db_config)->table('ims_bb_sku')->where(['id'=>$unit_sku_id])->update($update_data);
+                }else{//如果当前item不存在单品规格，新增
+                    $insert_data = [
+                        'goods_id'      =>  $v['id'],
+                        'sku_name'      =>  $v['goods_name'],
+                        'sku_img'       =>  $v['img'],
+                        'unit_name'     =>  $v['unit'],
+                        'unit_count'    =>  1,
+                        'comefrom'      =>  99,
+                        'createtime'    =>  $time,
+                        'code_list_temp'=>  $code_list_temp_arr,
+                        'is_used'       =>  1,
+                        'spec'          =>  $v['content'] . '*' . $v['unit']
+                    ];
+                    //插入一条新的数据
+                    DB::connect($db_config)->table('ims_bb_sku')->insert($insert_data);
+                }
+            }
+        }
+        var_dump(count($sku_tmp_arr), count($skus), count($unit_sku_id));
+    }
+
+    //清洗sku、item
+    public function wash_sku_item(){
+        /*ini_set('max_execution_time', 0);
+        ini_set('memory_limit','500M');*/
+
+        set_time_limit(0);
+        ini_set('memory_limit', '512M');
+
+        //$tmp = $this->ydxq_test;
+
+
+        $tmp = 'db_mini_mall';
+
+        $ydhl_db_config = [
+            // 数据库类型
+            'type'            => 'mysql',
+            // 服务器地址
+            'hostname'        => 'rm-2ze1k56hijk5me62xzo.mysql.rds.aliyuncs.com',
+            // 用户名
+            'username'        => 'ydhl_user',
+            // 密码
+            'password'        => 'Ydhl@user2019',
+            // 数据库名称
+            'database'        => 'ydhl',
+        ];
+
+        //获取商品列表
+        $product = DB::connect($ydhl_db_config)->field(['id', 'specValue', 'spec'])->table('bsj_parity_product')->select();
+
+        $product_tmp = [];
+        foreach ($product as $k => $v){
+            $product_tmp[ $v['id'] ] = $v;
+        }
+
+        $sku = DB::connect($tmp)->table('ims_bb_sku')->field('id,hbsj_sku_id,goods_id')->where([['spec', '=', '']])->order('id desc')->limit(10000)->select();
+        //dump(count($sku));die;
+        foreach ($sku as $k => $v){
+            if(isset($product_tmp[ $v['hbsj_sku_id'] ])){
+                $sku_data = [
+                    'spec'        =>  $product_tmp[ $v['hbsj_sku_id'] ]['spec'],
+                ];
+                //更新sku
+                DB::connect($tmp)->table('ims_bb_sku')->where(['id'=>$v['id']])->update($sku_data);
+                //更新item
+                $item_data = [
+                    'content'       =>  $product_tmp[ $v['hbsj_sku_id'] ]['specValue']
+                ];
+                DB::connect($tmp)->table('ims_bb_goods_item')->where(['id'=>$v['goods_id']])->update($item_data);
+            }
+        }
+
+        var_dump(count($sku));
+    }
+
+    public function washItemPriceCount(){
+        $tmp = 'db_mini_mall';
+
+        $item_sql = "select id from ims_bb_goods_item";
+        $item = DB::connect($tmp)->query($item_sql);
+
+        $channel_sql = 'select sum(channel_count) as channel_count,sku.goods_id from ims_bb_sku as sku join ims_bb_city_sku as cs on cs.sku_id = sku.id group by sku.goods_id';
+
+        $channels = DB::connect($tmp)->query($channel_sql);
+
+        $channels_tmp = [];
+        foreach ($channels as $k => $v){
+            $channels_tmp[ $v['goods_id'] ] = $v['channel_count'];
+        }
+
+        foreach ($item as $k => $v){
+            if(isset($channels_tmp[ $v['id'] ])){
+                $channel_data = $channels_tmp[ $v['id'] ];
+
+                $update_sql = 'update ims_bb_goods_item set sku_price_count = '.$channel_data . ' where id = '.$v['id'];
+
+                DB::connect($tmp)->execute($update_sql);
+            }
+        }
+    }
+
+
+    //导出价格到excel
+    public function lead_price_to_excel(){
+        include '../vendor/phpoffice/phpexcel/Classes/PHPExcel.php';
+        $ydxq_test = $this->ydxq_test;
+
+        //获取所有商品
+        $shop_goods_where = [
+            ['a.sup_id', '=', 461],
+            ['a.status', '=', 1],
+            ['a.deleted', '=', 0],
+            ['sg.status', '=', 1],
+            ['total', '>', 0]
+        ];
+        $shop_goods = DB::connect($ydxq_test)->field(['a.id', 'a.title','a.sale_pirce','a.skuid','c.c_name'])->table('ims_ewei_shop_goods')->alias('a')->join('ims_yd_supplier_goods sg', 'sg.goods_id = a.id')->LeftJoin('ims_ewei_new_shop_category c', 'c.id = a.ccate')->where($shop_goods_where)->select();
+
+        $skuids = array_column($shop_goods, 'skuid');
+
+        //获取这些sku的所有报价
+        $price_where = [
+            ['price.sku_id', 'in', $skuids],
+            ['ch.is_b2b', '=', 1]
+        ];
+        $channels = DB::connect($ydxq_test)->field('ch.id as ch_id,price.sku_id,ch.c_name,price.price')->table('ims_bb_price_list')->alias('price')->join('ims_bb_channel ch', 'price.channel_id = ch.id')->where($price_where)->select();
+
+        $channel_tmp = [];
+        foreach ($channels as $k => $v){
+            $channel_tmp[ $v['sku_id'] ][] = $v;
+        }
+
+        foreach ($shop_goods as $k => $v){
+
+            $chprices = [
+                'ch_id_1'       =>  '',
+                'ch_id_2'       =>  '',
+                'ch_id_3'       =>  '',
+                'ch_id_4'       =>  '',
+                'ch_id_6'       =>  '',
+                'ch_id_7'       =>  '',
+                'ch_id_15'       =>  '',
+            ];
+
+            //商品报价
+            if(isset( $channel_tmp[ $v['skuid'] ] )){
+                $channel = $channel_tmp[ $v['skuid'] ];//当前sku的所有报价
+
+                foreach ($channel as $chk => $chv){
+                    switch ($chv['ch_id']){
+                        case 1:
+                            $chprices['ch_id_1'] = $chv['price'];break;
+                        case 2:
+                            $chprices['ch_id_2'] = $chv['price'];break;
+                        case 3:
+                            $chprices['ch_id_3'] = $chv['price'];break;
+                        case 4:
+                            $chprices['ch_id_4'] = $chv['price'];break;
+                        case 6:
+                            $chprices['ch_id_6'] = $chv['price'];break;
+                        case 7:
+                            $chprices['ch_id_7'] = $chv['price'];break;
+                        case 15:
+                            $chprices['ch_id_15'] = $chv['price'];break;
+                        default:
+                            break;
+                    }
+                }
+
+                //获取最低价格
+                $min_price = min(array_column($channel, 'price'));
+                if($v['sale_pirce'] < $min_price){//1：小于最低价，2：等于最低价，3：大于最低价
+                    $type = 1;
+                }else if($v['sale_pirce'] == $min_price){
+                    $type = 2;
+                }else{
+                    $type = 3;
+                }
+            }else{
+                $type = 0;
+            }
+
+            $shop_goods[ $k ]['channel'] = $chprices;//各渠道报价
+
+            $shop_goods[ $k ]['type'] = $type;
+        }
+
+        //var_dump($channel_tmp);
+        $objPHPExcel  = new \PHPExcel();
+
+        $objPHPExcel->getProperties()->setCreator("商品")
+            ->setLastModifiedBy("商品")
+            ->setTitle("数据EXCEL导出")
+            ->setSubject("数据EXCEL导出")
+            ->setDescription("备份数据")
+            ->setKeywords("excel")
+            ->setCategory("result file");
+
+        $num = 1;
+
+        $objPHPExcel->setActiveSheetIndex(0)//Excel的第A列，uid是你查出数组的键值，下面以此类推
+            ->setCellValue('A'.$num, 'ID')
+            ->setCellValue('B'.$num, '商品名称')
+            ->setCellValue('C'.$num, '1：小于最低价，2：等于最低价，3：大于最低价')
+            ->setCellValue('D'.$num, '当前售价')
+            ->setCellValue('E'.$num, '大润发e路发')
+            ->setCellValue('F'.$num, '百世店加')
+            ->setCellValue('G'.$num, '链商优供')
+            ->setCellValue('H'.$num, '中商惠民')
+            ->setCellValue('I'.$num, '易久批')
+            ->setCellValue('J'.$num, '京批网')
+            ->setCellValue('K'.$num, '商道行')
+            ->setCellValue('L'.$num, '分类');
+
+        foreach ($shop_goods as $k => $v){
+            $num++;
+            $objPHPExcel->setActiveSheetIndex(0)//Excel的第A列，uid是你查出数组的键值，下面以此类推
+            ->setCellValue('A'.$num, $v['id'])
+            ->setCellValue('B'.$num, $v['title'])
+            ->setCellValue('C'.$num, $v['type'])
+            ->setCellValue('D'.$num, $v['sale_pirce'])
+            ->setCellValue('E'.$num, $v['channel']['ch_id_1'])
+            ->setCellValue('F'.$num, $v['channel']['ch_id_2'])
+            ->setCellValue('G'.$num, $v['channel']['ch_id_3'])
+            ->setCellValue('H'.$num, $v['channel']['ch_id_4'])
+            ->setCellValue('I'.$num, $v['channel']['ch_id_6'])
+            ->setCellValue('J'.$num, $v['channel']['ch_id_7'])
+            ->setCellValue('K'.$num, $v['channel']['ch_id_15'])
+            ->setCellValue('L'.$num, $v['c_name']);
+        }
+
+        $objPHPExcel->setActiveSheetIndex(0);
+        header('Content-Type: applicationnd.ms-excel');
+        header('Content-Disposition: attachment;filename=商品售价及渠道商价格.xls');
+        header('Cache-Control: max-age=0');
+        $objWriter = \PHPExcel_IOFactory::createWriter($objPHPExcel, 'Excel5');
+        $objWriter->save('php://output');
+        exit;
+    }
+
+    //清洗 ims_bb_city_sku 表的channel_count（b2b渠道报价数）
+    public function wash_city_channel_count(){
+
+        set_time_limit(0);
+        ini_set('memory_limit', '512M');
+
+        $bd_config = $this->ydxq_test;
+
+        //$bd_config = 'db_mini_mall';
+
+        //获取ims_bb_city_sku表的所有数据
+        $sku_ids = DB::connect($bd_config)->table('ims_bb_city_sku')->column('sku_id');
+        //统计
+        $price_where = [
+            ['sku_id', 'in', $sku_ids],
+            ['channel_id', 'in', [1,2,3,4,6,7,15]]
+        ];
+        $price = DB::connect($bd_config)->field(['sku_id'])->table('ims_bb_price_list')->where($price_where)->select();
+
+        //var_dump(DB::connect($bd_config)->getlastsql());
+        $price_tmp = [];
+        foreach ($price as $k => $v){
+            $price_tmp[ $v['sku_id'] ][] = $v;
+        }
+
+        foreach ($sku_ids as $k => $v){
+            if(isset($price_tmp[ $v ])){
+                DB::connect($bd_config)->table('ims_bb_city_sku')->where(['sku_id'=>$v])->update(['channel_count'=>count($price_tmp[ $v ])]);
+            }
+        }
+        //DB::connect($bd_config)->table('ims_bb_city_sku')->where(['sku_id'=>$v['sku_id']])->update(['channel_count'=>$v['count']]);
+    }
+
+    public function index_flx()
+    {
+        set_time_limit(0);
+        $m_RemoveModel = new ShopGoodsModel();
+        $st = time();
+        echo "a " . time() . "<br>";
+        $sqlCompareAll0 = "SELECT * FROM  ims_bb_city_sku order by id asc ";
+        $parityCompareAll0 = $m_RemoveModel->querySql($sqlCompareAll0);
+        $sku_compare_list0 = array();
+        foreach ($parityCompareAll0 as $one) {
+            $sku_compare_list0[$one['sku_id']] = $one;
+        }
+
+        $sqlCompareAll = "SELECT id,sku_id,price FROM  ims_bb_price_list where channel_id in (select id from ims_bb_channel where is_b2b = 1) order by id asc ";
+        $parityCompareAll = $m_RemoveModel->querySql($sqlCompareAll);
+
+
+        $sku_compare_list = array();
+        foreach ($parityCompareAll as $one) {
+            $sku_compare_list[$one['sku_id']][] = $one['price'];
+        }
+        $sku_price_list = array();
+        $one_price = array();
+        foreach ($sku_compare_list as $k=>$v) {
+            $arr_one = $v;
+            $one_price = null;
+            if (count($arr_one) > 0) {
+                $one_price['count'] = count($arr_one);
+                $arr_one = array_unique($arr_one);
+                sort($arr_one);
+                $one_price['min'] = $arr_one[0];
+                rsort($arr_one);
+                $one_price['max'] = $arr_one[0];
+                $sku_price_list[$k] = $one_price;
+            }
+        }
+
+        foreach ($sku_price_list as $k=>$v) {
+            if(isset($sku_compare_list0[$k])){
+
+                if($sku_compare_list0[$k]['min_price'] != $v['min'] || $sku_compare_list0[$k]['max_price']){
+                        //echo "update ims_bb_city_sku set min_price={$v['min']},max_price={$v['max']},updatetime={$st} where sku_id = {$k}";
+                    $res = $m_RemoveModel->querySql("update ims_bb_city_sku set min_price={$v['min']},max_price={$v['max']},updatetime={$st} where sku_id = {$k}");
+                    if(!$res){
+                        echo $k."<br>";
+                    }
+                }
+
+            }
+            //break;
+        }
+        echo "c " . time() . "<br>";
+
+        set_time_limit(30);
+        return "up  data ok !";
+    }
+
+    //清洗barcode表中的barcode_lists字段
+    public function item_code_lists(){
+        set_time_limit(0);
+        ini_set('memory_limit', '512M');
+
+        $skus = Db::connect($this->ydxq_test)->field(['goods_id','code_list'])->table('ims_bb_sku')->where(['unit_count'=>1])->select();
+
+        var_dump(count($skus));
+    }
+
+    public function goodsToErp(){
+            //写入erp
+            $data=[
+                'goods_code'    =>  '84187',
+                'goods_name'    =>  '奥利奥夹心饼干原味116g*1盒',
+                'goods_pic'     =>  'none.jpg'
+            ];
+            $postdata = http_build_query($data);
+            $opts = array('http' =>
+                array( 'method'  => 'POST','header'  => 'Content-type: application/form-data', 'content' => $postdata ) );
+            $url='http://ydxqtptest.yundian168.com/api/erp/goods_upload';
+            $context = stream_context_create($opts);
+            $request_rst = file_get_contents($url, false, $context);
+            $request_arr = json_decode($request_rst, true);
+            var_dump($request_arr);
+    }
+
+    //导出中商惠民的商品
+    public function lead_huimin_produnct(){
+        $tmp = 'db_mini_mall';
+
+        //获取中商惠民的所有商品
+        $huimin_products = Db::connect($tmp)->table('ims_huiminwang_product')->select();
+        //获取孙宇店所有的商品
+        $where = [
+            ['g.sup_id', '=', 461],
+            ['g.deleted', '=', 0]
+        ];
+        $shop_goods = Db::connect($this->ydxq_test)->field(['g.id', 'g.status','sup_g.status as sup_status','g.goods_code_list'])->table('ims_ewei_shop_goods')->alias('g')->join('ims_yd_supplier_goods sup_g', 'sup_g.goods_id = g.id')->where($where)->select();
+        foreach ($shop_goods as $k => $v){
+            $shop_goods[ $k ]['barcode'] = explode(',', $v['goods_code_list']);
+            if($v['status'] == 1 && $v['sup_status'] == 1){
+                $shop_goods[ $k ]['is_status'] = 1;//上架
+            }else{
+                $shop_goods[ $k ]['is_status'] = 2;//下架
+            }
+        }
+
+        //var_dump($huimin_products);
+        foreach ($huimin_products as $k => $v){
+            $huimin_products[ $k ]['is_sale'] = 0;//0未销售  1销售中并上架  2销售未上架
+            $huimin_products[ $k ]['goods_id'] = 0;//默认销售商品id为0
+            $huimin_barcode_arr = explode(',', $v['bar_code']);
+            foreach ($shop_goods as $sk => $sv){
+                foreach ($huimin_barcode_arr as $bark => $barv){
+                    if(in_array($barv, $sv['barcode'])){//存在销售的barcode
+                        $huimin_products[ $k ]['is_sale'] = $sv['is_status'];//1销售并上架  2销售未上架
+                        $huimin_products[ $k ]['goods_id'] = $sv['id'];
+                    }
+                }
+            }
+        }
+
+        //引入excel
+        include '../vendor/phpoffice/phpexcel/Classes/PHPExcel.php';
+
+        $objPHPExcel  = new \PHPExcel();
+
+        $objPHPExcel->getProperties()->setCreator("惠民网销售商品")
+            ->setLastModifiedBy("商品")
+            ->setTitle("数据EXCEL导出")
+            ->setSubject("数据EXCEL导出")
+            ->setKeywords("excel")
+            ->setCategory("result file");
+
+        $num = 1;
+
+        $objPHPExcel->setActiveSheetIndex(0)//Excel的第A列，uid是你查出数组的键值，下面以此类推
+            ->setCellValue('A'.$num, 'ID')
+            ->setCellValue('B'.$num, '商品名称')
+            ->setCellValue('C'.$num, '规格')
+            ->setCellValue('D'.$num, '品牌')
+            ->setCellValue('E'.$num, '一级分类')
+            ->setCellValue('F'.$num, '二级分类')
+            ->setCellValue('G'.$num, '建议售价')
+            ->setCellValue('H'.$num, '价格')
+            ->setCellValue('I'.$num, 'barcode')
+            ->setCellValue('J'.$num, '最小单位')
+            ->setCellValue('K'.$num, '包装单位')
+            ->setCellValue('L'.$num, '最小规格值')
+            ->setCellValue('M'.$num, '图片')
+            ->setCellValue('N'.$num, '0店铺未售 1店铺上架中 2店铺下架中')
+            ->setCellValue('O'.$num, 'goods_id')
+            ->setCellValue('P'.$num, '步长')
+            ->setCellValue('Q'.$num, '限购')
+            ->setCellValue('R'.$num, '售价')
+            ->setCellValue('S'.$num, '分类')
+            ->setCellValue('T'.$num, '包装数量');
+
+        foreach ($huimin_products as $k => $v){
+            $num++;
+            $objPHPExcel->setActiveSheetIndex(0)//Excel的第A列，uid是你查出数组的键值，下面以此类推
+                ->setCellValue('A'.$num, $v['id'])
+                ->setCellValue('B'.$num, $v['name'])
+                ->setCellValue('C'.$num, $v['spec'])
+                ->setCellValue('D'.$num, $v['brand_name'])
+                ->setCellValue('E'.$num, $v['main_classification'])
+                ->setCellValue('F'.$num, $v['classification'])
+                ->setCellValue('G'.$num, $v['salePrice'])
+                ->setCellValue('H'.$num, $v['curPrice'])
+                ->setCellValue('I'.$num, $v['bar_code'])
+                ->setCellValue('J'.$num, $v['min_unit'])
+                ->setCellValue('K'.$num, $v['unit'])
+                ->setCellValue('L'.$num, $v['spec_value'])
+                ->setCellValue('M'.$num, $v['image'])
+                ->setCellValue('N'.$num, $v['is_sale'])
+                ->setCellValue('O'.$num, $v['goods_id'])
+                ->setCellValue('S'.$num, $v['base_word']);
+        }
+
+        $objPHPExcel->setActiveSheetIndex(0);
+        header('Content-Type: applicationnd.ms-excel');
+        header('Content-Disposition: attachment;filename=惠民网商品库.xls');
+        header('Cache-Control: max-age=0');
+        $objWriter = \PHPExcel_IOFactory::createWriter($objPHPExcel, 'Excel5');
+        $objWriter->save('php://output');
+        exit;
+    }
+
+    //导入惠民网商品到
+    public function leadin_huimingoods(){
+        set_time_limit(0);
+        ini_set('memory_limit', '512M');
+
+        //引入excel
+        include '../vendor/phpoffice/phpexcel/Classes/PHPExcel.php';
+        $file = request()->file('file');//获取文件，file是请求的参数名
+
+        $dir = '../runtime/huimin/';
+        $info = $file->move($dir);
+        //表用函数方法 返回数组
+        $excel_path = $info->getSaveName();  //获取上传文件名
+        $file_name = $dir . $excel_path;   //上传文件的地址
+        $obj_PHPExcel = \PHPExcel_IOFactory::load($file_name);  //加载文件内容
+
+        $excel_array = $obj_PHPExcel->getsheet(0)->toArray();   //转换为数组格式
+
+        //删除第一行
+        array_shift($excel_array);
+
+        $db_config = 'db_mini_mall';
+        //$db_config = $this->ydxq_test;
+        $time = time();
+
+        //创建item
+        foreach ($excel_array as $k => $v){
+
+            //判断当前品牌在品牌表中是否存在
+            $brand_info = Db::connect($db_config)->table('ims_bb_brand')->where([['b_name', '=', $v[3]]])->find();
+            if(count($brand_info)){
+                $brand_id = $brand_info['id'];
+            }else{
+                $brand_data = [
+                    'b_name'        =>  $v[3],
+                    'come_form'     =>  3,
+                    'createtime'    =>  $time,
+                    'update_time'   =>  $time,
+                ];
+                $brand_id = Db::connect($db_config)->table('ims_bb_brand')->insertGetId($brand_data);
+            }
+
+            //获取二级分类
+            $cate_bb2 = Db::connect($db_config)->table('ims_bb_cate_bb')->where([['c_name', '=', $v[18]]])->find();
+            //二级分类id
+            $cate_bb2_id = empty($cate_bb2) ? 0 : $cate_bb2['id'];
+            //一级分类id
+            $cate_bb1_id = empty($cate_bb2) ? 0 : $cate_bb2['fid'];
+
+            //更新到item表
+            $item_data = [
+                'goods_name'        =>  $v[1],
+                'brand_id'          =>  $brand_id,
+                'cate_bb1'          =>  $cate_bb1_id,
+                'cate_bb2'          =>  $cate_bb2_id,
+                'code_list'         =>  $v[8],
+                'content'           =>  $v[11],
+                'unit'              =>  $v[10],
+                'img'               =>  $v[12],
+                'update_time'       =>  $time
+            ];
+            $item_id = Db::connect($db_config)->table('ims_bb_goods_item')->insertGetId($item_data);
+
+            $spec = strpos($v[2], '*') === false ? str_replace('\\', '*', $v[2]) : str_replace('\\', '/', $v[2]);
+            //更新到sku表
+            $sku_data = [
+                'goods_id'          =>  $item_id,
+                'sku_name'          =>  $v[1],
+                'sku_img'           =>  $v[12],
+                'unit_name'         =>  $v[10],
+                'unit_count'        =>  empty($v[19]) ? 1 : $v[19],
+                'comefrom'          =>  97,//99清洗的单规格sku  98自建sku  97中商惠民创建的sku
+                'code_list'         =>  $v[8],
+                'code_list_new'     =>  $v[8],
+                'code_list_pro'     =>  $v[8],
+                'createtime'        =>  $time,
+                'is_used'           =>  1,
+                'spec'              =>  $spec,
+            ];
+            $skuid = Db::connect($db_config)->table('ims_bb_sku')->insertGetId($sku_data);
+
+            //创建商品
+            //code单条码
+            $goods_code_arr = explode(',', $v[8]);
+            $goods_code = empty($goods_code) ? '' : $goods_code_arr[ 0 ];
+
+            //组装数据
+            $shop_goods_data = [
+                'sup_id'            =>  461,
+                'title'             =>  $v[1],
+                'uniacid'           =>  4,
+                'goods_code_list'   =>  $v[8],
+                'goods_code'        =>  $goods_code,
+                'brand'             =>  $brand_id,
+                'thumb'             =>  $v[12],
+                'total'             =>  999999,
+                'createtime'        =>  $time,
+                'updatetime'        =>  $time,
+                'skuid'             =>  $skuid,
+                'brand_id'          =>  $brand_id,
+                'bb_cate1'          =>  $cate_bb1_id,
+                'bb_cate2'          =>  $cate_bb2_id,
+                'sale_pirce'        =>  $v[17],
+                'smg_price'         =>  $v[17],
+                'smg_total'         =>  999999,
+                'bb_end_count'      =>  empty($v[16]) ? 0 : $v[16],//最大限购数
+                'bb_start_count'    =>  empty($v[15]) ? 1 : $v[15],//最低购买数
+                'bb_step'           =>  empty($v[15]) ? 1 : $v[15],//下单时步长
+            ];
+
+            $goods_id = Db::connect($db_config)->table('ims_ewei_shop_goods')->insertGetId($shop_goods_data);
+
+            //追加到
+            $sup_data = [
+                'goods_id'          =>  $goods_id,
+                'supplier_price'    =>  $v[17],
+                'supplier_id'       =>  461,
+                'status'            =>  1,
+                'update_time'       =>  $time,
+            ];
+            Db::connect($db_config)->table('ims_yd_supplier_goods')->insertGetId($sup_data);
+
+            /*//写入erp
+            $data=[
+                'goods_code'    =>  $goods_id,
+                'goods_name'    =>  $v[1],
+                'goods_pic'     =>  empty(imgSrc($v[12])) ?  'none.jpg' : imgSrc($v[12])
+            ];
+            $postdata = http_build_query($data);
+            $opts = array('http' =>
+                array( 'method'  => 'POST','header'  => 'Content-type: application/form-data', 'content' => $postdata ) );
+            $url='http://ydxqtptest.yundian168.com/api/erp/goods_upload';
+            $context = stream_context_create($opts);
+            $request_rst = file_get_contents($url, false, $context);
+            $request_arr = json_decode($request_rst, true);*/
+        }
+    }
+
+    //导入excel
+    public function lead_in_goods(){
+        set_time_limit(0);
+        ini_set('memory_limit', '512M');
+
+        //引入excel
+        include '../vendor/phpoffice/phpexcel/Classes/PHPExcel.php';
+        $file = request()->file('file');//获取文件，file是请求的参数名
+
+        $dir = '../runtime/huimin/';
+        $info = $file->move($dir);
+        //表用函数方法 返回数组
+        $excel_path = $info->getSaveName();  //获取上传文件名
+        $file_name = $dir . $excel_path;   //上传文件的地址
+        $obj_PHPExcel = \PHPExcel_IOFactory::load($file_name);  //加载文件内容
+
+        $excel_array = $obj_PHPExcel->getsheet(0)->toArray();   //转换为数组格式
+
+        //删除第一行
+        array_shift($excel_array);
+        //var_dump($excel_array);die;
+        //$db_config = 'db_mini_mall';
+        $db_config = $this->ydxq_test;
+        $time = time();
+
+        foreach ($excel_array as $k => $v){
+            $goods_id = $v[0];
+            $bb_start_count = empty($v[4]) ? 1 : $v[4];//起购数，步长
+            $bb_end_count = empty($v[5]) ? 0 : $v[5];//最大限购数
+            $price = $v[3];
+
+
+            Db::connect($db_config)->table($db_config)->table('ims_yd_supplier_goods')->where([['id', '=', $goods_id]])->update(['status'=>1,'supplier_price'=>$price]);
+
+            $sup_goods = Db::connect($db_config)->table($db_config)->table('ims_yd_supplier_goods')->where([['id', '=', $goods_id]])->find();
+
+            $where = [
+                ['id', '=', $sup_goods['goods_id']]
+            ];
+            $shop_goods_data = [
+                'status'        =>  1,
+                'updatetime'    =>  $time,
+                'sale_pirce'    =>  $price,
+                'bb_start_count'=>  $bb_start_count,
+                'bb_step'       =>  $bb_start_count,
+                'bb_end_count'  =>  $bb_end_count
+            ];
+
+            Db::connect($db_config)->table('ims_ewei_shop_goods')->where($where)->update($shop_goods_data);
+        }
+    }
+
+    public function lead_goods_1101(){
+        set_time_limit(0);
+        ini_set('memory_limit', '512M');
+
+        //引入excel
+        include '../vendor/phpoffice/phpexcel/Classes/PHPExcel.php';
+        $file = request()->file('file');//获取文件，file是请求的参数名
+
+        $dir = '../runtime/huimin/';
+        $info = $file->move($dir);
+        //表用函数方法 返回数组
+        $excel_path = $info->getSaveName();  //获取上传文件名
+        $file_name = $dir . $excel_path;   //上传文件的地址
+        $obj_PHPExcel = \PHPExcel_IOFactory::load($file_name);  //加载文件内容
+
+        $excel_array = $obj_PHPExcel->getsheet(0)->toArray();   //转换为数组格式
+
+        //删除第一行
+        array_shift($excel_array);
+        var_dump($excel_array);die;
+        $db_config = 'db_mini_mall';
+        //$db_config = $this->ydxq_test;
+        $time = time();
+
+        foreach ($excel_array as $k => $v){
+            $title = $v[1].$v[6];
+            $brand = $v[2];
+            if(false === strstr($title, $brand)){
+                $title = $brand.$title;
+            }
+
+            $data = [
+                'uniacid'       =>  4,
+                'sup_id'        =>  461,
+                'type'          =>  1,
+                'status'        =>  1,
+                'title'         =>  $title,
+                'brand'         =>  $brand,
+                's_spec'        =>  $v[6],
+                'thumb'         =>  $v[10],
+                'unit'          =>  $v[5],
+                'total'         =>  30000,
+                'createtime'    =>  $time,
+                'skuid'         =>  $v[0],
+                'brand_id'      =>  $v[7],
+                'bb_cate1'      =>  $v[8],
+                'bb_cate2'      =>  $v[9],
+                'sale_pirce'    =>  $v[11],
+                'bb_start_count'=>  $v[12],
+                'bb_step'       =>  $v[12]
+            ];
+
+            $goods_id = Db::connect($db_config)->table('ims_ewei_shop_goods')->insertGetId($data);
+
+            $s_data = [
+                'supplier_id'       =>  461,
+                'goods_id'          =>  $goods_id,
+                'status'            =>  1,
+                'update_time'       =>  $time,
+                'supplier_price'    =>  $v[11]
+            ];
+
+            Db::connect($db_config)->table('ims_yd_supplier_goods')->insertGetId($s_data);
+        }
+    }
+    
+    //清洗商品的分类
+    public function wash_shop_goods_bb_cate(){
+        set_time_limit(0);
+        ini_set('memory_limit', '512M');
+
+        //$db_config = 'db_mini_mall';
+        $db_config = $this->ydxq_test;
+
+        $ids_arr = explode(',', '60921,61276,61407,61479,68293,71620,84015');
+
+        $shop_goods_where = [
+            ['id', 'in', $ids_arr]
+        ];
+        $shop_goods = Db::connect($db_config)->field(['id', 'skuid'])->table('ims_ewei_shop_goods')->where($shop_goods_where)->select();
+
+        $skuids = array_column($shop_goods, 'skuid');
+
+        //获取所有的sku
+        $sku_where = [
+            ['sku.id', 'in', $skuids]
+        ];
+        $skus = Db::connect($db_config)->field(['sku.id','sku.sku_img','sku.unit_name','sku.unit_count','sku.hbsj_sku_id','sku.hbsj_item_id','sku.code_list_new','item.brand_id','item.cate_bb1','item.cate_bb2','item.brand_id'])->table('ims_bb_sku')->alias('sku')->join('ims_bb_goods_item item', 'item.id = sku.goods_id')->where($sku_where)->select();
+        $skus_tmp = [];
+        foreach ($skus as $k => $v){
+            $skus_tmp[ $v['id'] ]  = $v;
+        }
+
+        foreach ($shop_goods as $k => $v){
+            if(isset( $skus_tmp[ $v['skuid'] ] )){
+                $sku = $skus_tmp[ $v['skuid'] ];
+
+                $update_data = [
+                    'bb_cate1'      =>  $sku['cate_bb1'],
+                    'bb_cate2'      =>  $sku['cate_bb2'],
+                    'brand_id'      =>  $sku['brand_id'],
+                    'hbsj_sku_id'   =>  $sku['hbsj_sku_id'],
+                ];
+
+                Db::connect($db_config)->table('ims_ewei_shop_goods')->where([['id', '=', $v['id']]])->update($update_data);
+            }
+        }
+
+    }
+
+    //去除重复的
+    public function unique_shop_goods_sku(){
+        $db_config = $this->ydxq_test;
+        $shop_goods = Db::connect($db_config)->field(['id', 'title','count(*) as count', 'skuid'])->table('ims_ewei_shop_goods')->where([['sup_id', '=', 461], ['status', '=', 1], ['deleted', '=', 0]])->group('skuid')->having('count > 1')->select();
+
+        $skuids = array_column($shop_goods, 'skuid');
+
+        $cf = Db::connect($db_config)->field(['g.id','g.title','g.skuid','sku.sku_name','sku.spec','sku.unit_name','sku.unit_count','sale_pirce'])->table('ims_ewei_shop_goods')->alias('g')->join('ims_bb_sku sku', 'sku.id = g.skuid')->where([['g.sup_id', '=', 461], ['g.skuid', 'in', $skuids],['g.deleted','=', 0]])->order('g.skuid')->select();
+
+        //引入excel
+        include '../vendor/phpoffice/phpexcel/Classes/PHPExcel.php';
+
+        $objPHPExcel  = new \PHPExcel();
+
+        $objPHPExcel->getProperties()->setCreator("销售商品")
+            ->setLastModifiedBy("商品")
+            ->setTitle("数据EXCEL导出")
+            ->setSubject("数据EXCEL导出")
+            ->setKeywords("excel")
+            ->setCategory("result file");
+
+        $num = 1;
+
+        $objPHPExcel->setActiveSheetIndex(0)//Excel的第A列，uid是你查出数组的键值，下面以此类推
+            ->setCellValue('A'.$num, 'ID')
+            ->setCellValue('B'.$num, '商品名称')
+            ->setCellValue('C'.$num, 'sku名称')
+            ->setCellValue('D'.$num, '规格')
+            ->setCellValue('E'.$num, '销售规格')
+            ->setCellValue('F'.$num, '售价')
+            ->setCellValue('G'.$num, 'skuid');
+
+        foreach ($cf as $k => $v){
+            $num++;
+            $objPHPExcel->setActiveSheetIndex(0)//Excel的第A列，uid是你查出数组的键值，下面以此类推
+                ->setCellValue('A'.$num, $v['id'])
+                ->setCellValue('B'.$num, $v['title'])
+                ->setCellValue('C'.$num, $v['sku_name'])
+                ->setCellValue('D'.$num, $v['spec'])
+                ->setCellValue('E'.$num, $v['unit_count'].$v['unit_name'])
+                ->setCellValue('F'.$num, $v['sale_pirce'])
+                ->setCellValue('G'.$num, $v['skuid']);
+        }
+
+        $objPHPExcel->setActiveSheetIndex(0);
+        header('Content-Type: applicationnd.ms-excel');
+        header('Content-Disposition: attachment;filename=重复sku商品.xls');
+        header('Cache-Control: max-age=0');
+        $objWriter = \PHPExcel_IOFactory::createWriter($objPHPExcel, 'Excel5');
+        $objWriter->save('php://output');
+        exit;
+    }
+
+    public function delete_goods(){
+        $where = '(g.status = 0 or sg.status = 0 ) and sg.sup_id = 461';
+        $goods = Db::connect($this->ydxq_test)->field(['sg.id'])->table('ims_ewei_shop_goods')->alias('sg')->join('ims_yd_supplier_goods g', 'sg.id = g.goods_id')->where($where)->select();
+        $goods_ids = array_column($goods, 'id');
+
+        Db::connect($this->ydxq_test)->table('ims_ewei_shop_goods')->where([['id', 'in', $goods_ids]])->update(['status'=>0, 'skuid'=>'', 'deleted'=>1, 'hbsj_sku_id'=>'']);
+
+        Db::connect($this->ydxq_test)->table('ims_yd_supplier_goods')->where([['goods_id', 'in', $goods_ids]])->update(['status'=>0]);
+    }
+
+    //清洗商品表中的barcode
+    public function wash_shop_goods_barcode(){
+        set_time_limit(0);
+        ini_set('memory_limit', '512M');
+        //$db_config = 'db_mini_mall';
+        $db_config = $this->ydxq_test;
+        //获取商品表中所有的sku
+        $shop_goods_where = [
+            ['sup_id', '=', 461],
+            ['status', '=', 1],
+            ['deleted', '=', 0]
+        ];
+
+        $skuids = Db::connect($db_config)->table('ims_ewei_shop_goods')->where($shop_goods_where)->column('skuid');
+
+        //根据skuid获取所有的item_id
+        $item_ids = Db::connect($db_config)->table('ims_bb_sku')->where([['id', 'in', $skuids]])->column('goods_id');
+
+        //获取每个item下的单个商品的barcode
+        $sku_where = [
+            ['goods_id', 'in', $item_ids],
+            ['unit_count', '=', 1]
+        ];
+        $barcodes = Db::connect($db_config)->field(['id', 'code_list_new'])->table('ims_bb_sku')->where($sku_where)->select();
+        $barcodes_tmp = [];
+        foreach ($barcodes as $k => $v){
+            $barcodes_tmp[ $v['id'] ] = $v['code_list_new'];
+        }
+
+        //更新商品表中的barcode字段
+        foreach ($barcodes_tmp as $k => $v){
+            $code_arr = explode(',', $v);
+            $code = isset($code_arr[0]) ? $code_arr[0] : '';
+            $update_data = [
+                'goods_code_list'       =>  $v,
+                'goods_code'            =>  $code
+            ];
+            Db::connect($db_config)->table('ims_ewei_shop_goods')->where([['skuid', '=', $k]])->update($update_data);
+        }
+    }
+
+    //更新item
+    public function update_item(){
+        set_time_limit(0);
+        ini_set('memory_limit', '512M');
+
+        //获取product表中的所有数据
+        $db_config_ydhl = 'db_ydhl';
+
+        $db_ydxq_test = $this->ydxq_test;
+
+        //获取所有的product
+        $products_ids = Db::connect($db_config_ydhl)->table('bsj_parity_product')->column('id');
+
+        //var_dump(count($products_ids));die;
+        //获取商品库所有的skuids
+
+        $hbsj_sku_ids = Db::connect($db_ydxq_test)->table('ims_bb_sku')->column('hbsj_sku_id');
+
+        //取差集，再取交集,去除空值
+        $diff_ids = array_filter(array_intersect(array_diff($hbsj_sku_ids, $products_ids), $products_ids));
+
+        //如果存在新的sku,则在商品库创建新的item和sku
+        if(count($diff_ids)){
+            //var_dump($diff_ids);die;
+            //获取product表中的空的数据
+            $diff_where = [
+                ['id', 'in', $diff_ids]
+            ];
+
+            $diff_products = Db::connect($db_config_ydhl)->table('bsj_parity_product')->where($diff_where)->select();
+            //var_dump($diff_product);
+            $item_ids = array_unique(array_column($diff_products, 'itemId'));
+
+            //获取item表所有的hbsj_item_id
+            $hbsj_item_ids = Db::connect($db_ydxq_test)->table('ims_bb_goods_item')->column('hbsj_item_id');
+
+            $diff_item_ids = array_filter(array_intersect(array_diff($hbsj_item_ids, $item_ids), $item_ids));
+
+            $no_in_db_item = [];
+            foreach ($diff_products as $k => $v){
+                if(in_array($v['itemId'], $diff_item_ids)){
+                    $no_in_db_item[] = $v;
+                }
+            }
+
+            //获取当前所有的品牌
+            $brands = Db::connect($db_ydxq_test)->field(['id', 'b_name'])->table('ims_bb_brand')->select();
+            $brand_tmp = [];
+            foreach ($brands as $k => $v){
+                $brand_tmp[ $v['id'] ] = $v['b_name'];
+            }
+
+            //插入新的item
+            $insert_item_data = [];
+            foreach ($no_in_db_item as $k => $v){
+                //验证当前品牌是否存在
+                $brand_name = $v['bandName'];
+                $brand_id = array_search($brand_name, $brand_tmp);
+                if(!$brand_id){
+                    //创建一个新的品牌
+                    //Db::connect($db_ydxq_test)->table('ims_');
+                }
+            }
+        }
+
+    }
+
+    //清洗报价表
+    public function wash_price_list(){
+        //获取所有的skuid
+        set_time_limit(0);
+        ini_set('memory_limit', '512M');
+
+        //获取product表中的所有数据
+        $db_config_ydhl = 'db_ydhl';
+
+        //$db_ydxq_test = $this->ydxq_test;//正式库
+        $db_ydxq_test = 'db_mini_mall';//测试库
+
+        //获取所有的skuid
+        $skus = Db::connect($db_ydxq_test)->field(['hbsj_sku_id', 'id'])->table('ims_bb_sku')->select();
+        echo time().'<br/>';
+        $hbsj_sku_ids = array_column($skus, 'hbsj_sku_id');
+        echo time().'<br/>';
+        //获取product所有的id
+        $product_ydhl_ids = Db::connect($db_config_ydhl)->table('bsj_parity_product')->column('id');
+        echo time().'<br/>';
+        $skuids = array_intersect($hbsj_sku_ids, $product_ydhl_ids);
+        echo time().'<br/>';
+        $where1 = [
+            ['skuId', 'in', $skuids]
+        ];
+        //获取这些sku的所有最新报价
+        $prices = Db::connect($db_config_ydhl)->field(['channel', 'skuId', 'startPrice', 'totalPrice', 'channelId', 'saleAttrValue', 'singlePrice'])->table('bsj_parity_compare')->where($where1)->select();
+        echo time().'<br/>';
+        $prices = Db::connect($db_config_ydhl)->field(['channel', 'skuId', 'startPrice', 'totalPrice', 'channelId', 'saleAttrValue', 'singlePrice'])->table('bsj_parity_compare')->select();
+        echo time().'<br/>';die;
+
+        $channels = array_unique(array_column($prices,'channel'));
+
+        //获取所有的报价商
+        $c_names = Db::connect($db_ydxq_test)->table('ims_bb_channel')->column('c_name');
+
+        $names = array_intersect(array_diff($channels, $c_names), $channels);
+        echo time().'<br/>';
+        foreach ($names as $k => $v){
+            $insert_data = [
+                'c_name'        =>  $v,
+                'createtime'    =>  time()
+            ];
+            Db::connect($db_ydxq_test)->table('ims_bb_channel')->insertGetId($insert_data);
+        }
+
+        $db_channels = Db::connect($db_ydxq_test)->table('ims_bb_channel')->select();
+        $db_channels_tmp = [];
+        foreach ($db_channels as $k => $v){
+            $db_channels_tmp[ $v['id'] ] = $v['c_name'];
+        }
+
+        $skus_tmp = [];
+        foreach ($skus as $k => $v){
+            $skus_tmp[ $v['hbsj_sku_id'] ] = $v['id'];
+        }
+
+        echo time().'<br/>';
+
+        //清空表
+        Db::connect($db_ydxq_test)->table('ims_bb_price_list')->where([['id', '>', 0]])->delete();
+        $date = date('Ymd', time());
+        $time = time();
+        $price_lists = [];
+        $sku_chennel = [];
+        foreach ($prices as $k => $v){
+            $skuid = 0;
+            if(isset($skus_tmp[ $v['skuId'] ])){
+                $skuid = $skus_tmp[ $v['skuId'] ];
+            }
+            if(empty($skuid)){
+                continue;
+            }
+
+            $channel_id = array_search($v['channel'], $db_channels_tmp);
+            if(!$channel_id){
+                continue;
+            }
+
+            if(!in_array($skuid . '_' . $channel_id, $sku_chennel)){
+                $list = [
+                    'sku_id'        =>  $skuid,
+                    'channel_id'    =>  $channel_id,
+                    'price'         =>  $v['totalPrice'],
+                    'price_avg'     =>  $v['singlePrice'],
+                    'date'          =>  $time,
+                    'price_date'    =>  $date,
+                    'createtime'    =>  $time,
+                    'hbsj_sku_id'   =>  $v['skuId'],
+                    'hbsj_channel_id'=> $v['channelId']
+                ];
+                $price_lists[] = $list;
+            }
+
+            $sku_chennel[] = $skuid . '_' . $channel_id;
+        }
+
+        echo time().'<br/>';
+
+        $new_array = array_chunk($price_lists,1000);
+        foreach ($new_array as $k => $v){
+            Db::connect($db_ydxq_test)->table('ims_bb_price_list')->insertAll($v);
+        }
+
+        echo time().'<br/>';
+        die;
+
+        //清洗city_sku表
+        $channel_ids = Db::connect($db_ydxq_test)->table('ims_bb_channel')->where([['is_b2b', '=', 1]])->column('id');
+        //$price_lists_all = Db::connect($db_ydxq_test)->field(['sku_id', 'price', 'channel_id', 'hbsj_sku_id'])->table('ims_bb_price_list_flx')->select();
+        $price_lists_all = $price_lists;
+
+        //清空city_sku
+        Db::connect($db_ydxq_test)->table('ims_bb_city_sku')->where([['id', '>', 0]])->delete();
+
+        $price_tmp = [];
+        foreach ($price_lists_all as $k => $v){
+            $price_tmp[ $v['sku_id'] ][] = $v;
+        }
+
+        $city_sku_data = [];
+        foreach ($price_tmp as $k => $v){
+            $channel_count_all = count($v);//所有报价数
+            //b2b报价
+            $b2b_price = [];
+            foreach ($v as $bk => $bv){
+                if(in_array($bv['channel_id'], $channel_ids)){
+                    $b2b_price[] = $bv;
+                }
+            }
+
+            $channel_count = count($b2b_price);//b2b报价数
+            $price_column = array_column($b2b_price, 'price');
+            if($channel_count){
+                $data = [
+                    'sku_id'        =>  $k,
+                    'city_code'     =>  '110000',
+                    'min_price'     =>  min($price_column),
+                    'max_price'     =>  max($price_column),
+                    'channel_count' =>  $channel_count,
+                    'channel_count_all'=>$channel_count_all,
+                    'createtime'    =>  $time,
+                    'updatetime'    =>  $time,
+                    'hbsj_sku_id'   =>  isset($v[0]) ? $v[0]['hbsj_sku_id'] : '',
+                ];
+                $city_sku_data[] = $data;
+            }
+        }
+
+        $city_new_array = array_chunk($city_sku_data,1000);
+        foreach ($city_new_array as $k => $v){
+            Db::connect($db_ydxq_test)->table('ims_bb_city_sku')->insertAll($v);
+        }
+    }
+
+    //清洗sku的订单数和下单用户数
+    public function wash_sku_orders(){
+        $db_config = $this->ydxq_test;
+        $goods_sql = "select id,skuid from ims_ewei_shop_goods where sup_id = 461 and status = 1 and deleted = 0 and is_activity = 0";
+        $goods = Db::connect($db_config)->query($goods_sql);
+
+        $goods_ids = implode(',', array_column($goods, 'id'));
+
+        //获取当前商品的所有订单
+        $order_sql = "select o.openid,goods.goodsid from ims_ewei_shop_order_goods as goods join ims_ewei_shop_order as o on o.id = goods.orderid where o.status in (0,1,2,3) and goods.goodsid in ({$goods_ids})";
+
+        $orders = Db::connect($db_config)->query($order_sql);
+
+        $goods_tmp = [];
+        foreach ($orders as $k => $v){
+            $goodsid = $v['goodsid'];
+            if(isset($goods_tmp[$goodsid])){
+                $goods_tmp[$goodsid]['order_num'] += 1;//订单数加一
+                if(!in_array($v['openid'],  $goods_tmp[$goodsid]['openids'])){
+                    $goods_tmp[$goodsid]['order_user_num'] += 1;//订单用户数加一
+                    $goods_tmp[$goodsid]['openids'][] = $v['openid'];
+                }
+            }else{
+                $v['order_num'] = 1;
+                $v['order_user_num'] = 1;
+                $v['openids'][] = $v['openid'];
+                $goods_tmp[$goodsid] = $v;
+            }
+        }
+
+        foreach ($goods as $k => $v){
+            if(isset($goods_tmp[$v['id']])){
+                $goods[$k]['order_num'] = $goods_tmp[$v['id']]['order_num'];
+                $goods[$k]['order_user_num'] = $goods_tmp[$v['id']]['order_user_num'];
+            }else{
+                unset($goods[$k]);
+            }
+        }
+
+        $goods_arr = [];
+        foreach ($goods as $k => $v){
+            $goods_arr[] = [
+                'id'                =>  $v['skuid'],
+                'order_num'         =>  $v['order_num'],
+                'order_user_num'    =>  $v['order_user_num']
+            ];
+        }
+
+        $goods_arr = array_chunk($goods_arr, 100);
+        foreach ($goods_arr as $k => $v){
+            //生成批量更新sql
+            $sql = $this->batchUpdate('ims_bb_sku', $v, 'id');
+
+            Db::connect($db_config)->execute($sql);//执行更新语句
+        }
+    }
+    
+    public function batchUpdate($table, $data, $field){
+        if (!is_array($data) || !$field) {
+            return false;
+        }
+
+        $updates = $this->parseUpdate($data, $field);
+
+        // 获取所有键名为$field列的值，值两边加上单引号，保存在$fields数组中
+        $fields = array_column($data, $field);
+        $fields = implode(',', array_map(function($value) {
+            return "'".$value."'";
+        }, $fields));
+
+        $sql = sprintf("UPDATE `%s` SET %s WHERE `%s` IN (%s)", $table, $updates, $field, $fields);
+
+        return $sql;
+    }
+
+    public function parseUpdate($data, $field){
+        $sql = '';
+        $keys = array_keys(current($data));
+        foreach ($keys as $column) {
+            if($column == $field){
+                continue;
+            }
+            $sql .= sprintf("`%s` = CASE `%s` \n", $column, $field);
+            foreach ($data as $line) {
+                $sql .= sprintf("WHEN '%s' THEN '%s' \n", $line[$field], $line[$column]);
+            }
+            $sql .= "END,";
+        }
+        return rtrim($sql, ',');
+    }
+    
+    
+    
+    
+    
+
+    public function order_bind_coupon(){
+        $order_sns = 'SH20191107102334992217,SH20191106185313284725,SH20191106185204660464,SH20191106184029968912,SH20191106174108322877';
+        $time = time();
+        $order_sns = explode(',', $order_sns);
+        //dump($order_sns);die;
+        //获取当前订单的详情信息
+        $db_config = 'db_mini_mall';
+        $where = [
+            ['ordersn', 'in', $order_sns]
+        ];
+        $orders = Db::connect($db_config)->field(['id', 'coupon_id', 'price', 'openid'])->table('ims_ewei_shop_order')->where($where)->select();
+        foreach ($orders as $k => $v){
+            if(empty($v['coupon_id'])){
+                //生成一张优惠券
+                $coupon_data = [
+                    'coupon_id'     =>  1111,
+                    'openid'        =>  $v['openid'],
+                    'openid_time'   =>  $time,
+                    'time_start'    =>  $time,
+                    'time_end'      =>  1573142400,//结束时间  固定：2019-11-08 00:00:00
+                    'order_id'      =>  $v['id'],
+                    'create_time'   =>  $time,
+                    'coupon_status' =>  3,
+                    'status'        =>  1
+                ];
+                $coupon_id = Db::connect($db_config)->table('ims_ewei_shop_member_coupon')->insertGetId($coupon_data);
+                $up_price = $v['price'] - 10;
+                $up_data = [
+                    'price'     =>  $up_price,
+                    'goodsprice'=>  $up_price,
+                ];
+                Db::connect($db_config)->table('ims_ewei_shop_order')->where([['id', '=', $v['id']]])->update($up_data);
+            }
+        }
+    }
+}

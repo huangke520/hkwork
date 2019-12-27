@@ -1,0 +1,869 @@
+<?php
+/**
+ * ceadr 2019-08-13
+ */
+
+namespace app\api\controller;
+
+use think\Db;
+use app\api\model\ydxq\MemberGoldCount;
+use app\api\model\ydxq\MemberLevelLog;
+use app\api\model\ydxq\MemberMonthLevel;
+use app\api\model\ydxq\MemberRedemptionVoucher;
+use app\api\model\ydxq\MemberRuleLevel;
+use app\api\model\ydxq\ShopMember;
+use app\api\model\ydxq\ShopMemberLog;
+use app\api\model\ydxq\ShopMemberDebug;
+use app\api\model\ydxq\MemberActionLog;
+use app\api\model\ydxq\MemberShareLog;
+use app\api\model\ydxq\Supplier;
+use app\api\model\ydxq\YdSupplierGift;
+
+class Member extends BaseController {
+    public function __construct() {
+        header("Access-Control-Allow-Origin: *");
+        header("Access-Control-Allow-Methods: POST, GET");
+
+        parent::__construct();
+    }
+
+    public function action() {
+        $param = $this->request_param;
+        $arr = [
+            'log_type' => $param['aid'],
+            'sup_id' => $param['sid'],
+            'openid' => $param['openid'],
+            'member_id' => $param['member_id'],
+            'log_info' => $param['info'],
+            'createtime' => time()
+        ];
+        $log = new MemberActionLog();
+        $ret = $log->insertInfo($arr);
+        if($param['sid'] == 461){
+            //获取种子用户id
+            $info = Db::connect('db_mall_erp')
+                ->table('potential_customer')
+                ->field('id,parent_id')
+                ->where('is_validity',1)
+                ->where('xcx_openid',$param['openid'])
+                ->find();
+            if($info){
+                $customer_id = $info['parent_id'] > 0 ? $info['parent_id'] : $info['id'];
+                if($param['aid'] == 14){
+                    Db::connect('db_mall_erp')
+                        ->table('potential_customer')
+                        ->where('id',$customer_id)
+                        ->update(['browse_time'=>time(),'cart_time'=>time()]);
+                }else{
+                    Db::connect('db_mall_erp')
+                        ->table('potential_customer')
+                        ->where('id',$customer_id)
+                        ->update(['browse_time'=>time()]);
+                }
+            }
+        }
+
+        sdk_return('', 1, 'success');
+    }
+
+    public function actionNew() {
+        $ref = '';
+        if(isset($_SERVER['HTTP_REFERER'])){
+            $ref = $_SERVER['HTTP_REFERER'];
+        }
+
+        $param = $this->request_param;
+        $param['log_type'] = isset($param['log_type']) ? $param['log_type'] : 0;
+        $param['sup_id'] = isset($param['sup_id']) ? $param['sup_id'] : 0;
+        $param['openid'] = isset($param['openid']) ? $param['openid'] : '';
+        $param['member_id'] = isset($param['member_id']) ? $param['member_id'] : 0;
+        $param['log_info'] = isset($param['log_info']) ? $param['log_info'] : '';
+        $param['actionname'] = isset($param['actionname']) ? $param['actionname'] : '';
+        $param['fromopenid'] = isset($param['fromopenid']) ? $param['fromopenid'] : '';
+        $param['chatroomid'] = isset($param['chatroomid']) ? $param['chatroomid'] : '';
+        $param['pagename'] = isset($param['pagename']) ? $param['pagename'] : '';
+        $param['goodsid'] = isset($param['goodsid']) ? $param['goodsid'] : 0;
+        $param['brandid'] = isset($param['brandid']) ? $param['brandid'] : 0;
+        $param['cateid'] = isset($param['cateid']) ? $param['cateid'] : 0;
+        $param['searchkey'] = isset($param['searchkey']) ? $param['searchkey'] : '';
+        $param['fromtype'] = isset($param['fromtype']) ? $param['fromtype'] : '';
+        $param['showtype'] = isset($param['showtype']) ? $param['showtype'] : '';
+        $param['orderid'] = isset($param['orderid']) ? $param['orderid'] : 0;
+        $param['goodscount'] = isset($param['goodscount']) ? $param['goodscount'] : 0;
+        $param['barcode'] = isset($param['barcode']) ? $param['barcode'] : '';
+
+
+        $nowtime = time();
+        $browsetime = 0;
+        //计算浏览时长
+        $member_log_model = new ShopMemberLog();
+        if($param['showtype'] == 'onhide'){
+            $member_log_arr = $member_log_model->querySql("SELECT createtime from ims_member_action_log where sup_id = {$param['sup_id']} and log_type = {$param['log_type']} and openid = '{$param['openid']}'  and ref = '{$ref}'  order by createtime desc ");
+            if(is_array($member_log_arr) && isset($member_log_arr[0])){
+                $browsetime = $nowtime - $member_log_arr[0]['createtime'];
+            }
+        }
+
+        //插入数据
+        $arr = [
+            'log_type' => $param['log_type'],
+            'sup_id' => $param['sup_id'],
+            'openid' => $param['openid'],
+            'member_id' => $param['member_id'],
+            'log_info' => $param['log_info'],
+            'actionname' => $param['actionname'],
+            'fromopenid' => $param['fromopenid'],
+            'chatroomid' => $param['chatroomid'],
+            'ref' => $ref,
+            'pagename' => $param['pagename'],
+            'goodsid' => $param['goodsid'],
+            'brandid' => $param['brandid'],
+            'cateid' => $param['cateid'],
+            'searchkey' => $param['searchkey'],
+            'fromtype' => $param['fromtype'],
+            'showtype' => $param['showtype'],
+            'orderid' => $param['orderid'],
+            'goodscount' => $param['goodscount'],
+            'barcode' => $param['barcode'],
+            'browsetime' => $browsetime,
+            'createtime' => time(),
+
+        ];
+
+        $log = new MemberActionLog();
+        $ret = $log->insertInfo($arr);
+        sdk_return('', 1, 'success');
+    }
+
+    public function member_share_log() {
+        $param = $this->request_param;
+
+        $arr = [
+            'log_type' => $param['log_type'],
+            'sup_id' => $param['sup_id'],
+            'openid_from' => is_sns($param['openid_from']),
+            'openid_to' => is_sns($param['openid_to']),
+            'group_id' => $param['group_id'],
+            'share_url' => $param['share_url'],
+            'create_time' => time()
+        ];
+        $log = new MemberShareLog();
+        $ret = $log->insertInfo($arr);
+        sdk_return('', 1, 'success');
+    }
+
+
+    /**
+     * 查询本月消费数据
+     * @param string $sup_id
+     * @param string $openid
+     * @return array|bool
+     */
+    protected function month($sup_id = '',$openid = ''){
+        if((empty($sup_id)) || (empty($openid))){
+            return false;
+        }
+        $sum_money = 0;//月总消费金额
+        $sum_count = 0;//月总消费次数
+        $sum_day = 0;//月总消费天数
+        $month_start = strtotime(date('Y-m'));//当前年月时间戳
+        $end_time = time();//当前时间戳
+        $day_num = date("t", strtotime($month_start));//查询当月多少天
+        $year = date('Y');//当前年
+        $today_month = date('m');//当前月
+        unset($date_arr);
+        for ($i = 1; $i <= $day_num; $i++) {
+            $date_arr[] = $today_month . '-' . $i;
+        }
+
+        //查询member_log表的数据
+        //查询店铺的openID
+        $member_log_model = new ShopMemberLog();
+        $shop_openid_arr = $member_log_model->querySql("SELECT openid,is_dist from ims_yd_supplier where id = {$sup_id}");
+        $shop_openid = !empty($shop_openid_arr[0]['openid']) ? $shop_openid_arr[0]['openid'] : '';
+        $shop_is_dist = !empty($shop_openid_arr[0]['is_dist']) ? $shop_openid_arr[0]['is_dist'] : '';
+        //查询当前用户的当月的所有消费记录
+        if($today_month == 9){
+            if($shop_is_dist == 1){
+                if($openid == 'sns_wa_ogrIh0V5T8eGtUINOheRKs4_bIgs') {
+                    $user_money_sql = "SELECT pay_openid,money,createtime FROM ims_ewei_shop_member_log where (type = 80 or type = 100) and status=1 and openid = '" . $shop_openid . "' and createtime >= 1568822400 and createtime < {$end_time}  and pay_openid = '{$openid}'";
+                }else{
+                    $user_money_sql = "SELECT pay_openid,money,createtime FROM ims_ewei_shop_member_log where (type = 80 or type = 100) and status=1 and openid = '" . $shop_openid . "' and createtime >= 1568967180 and createtime < {$end_time}  and pay_openid = '{$openid}'";
+                    //            1568967180,,8.3.27上线时间
+                }
+            }else{
+                $user_money_sql = "SELECT pay_openid,money,createtime FROM ims_ewei_shop_member_log where (type = 80 or type = 100) and status=1 and openid = '" . $shop_openid . "' and createtime >= {$month_start} and createtime < {$end_time}  and pay_openid = '{$openid}'";
+            }
+        }else{
+            $user_money_sql = "SELECT pay_openid,money,createtime FROM ims_ewei_shop_member_log where (type = 80 or type = 100) and status=1 and openid = '" . $shop_openid . "' and createtime >= {$month_start} and createtime < {$end_time}  and pay_openid = '{$openid}'";
+        }
+        $user_money = $member_log_model->querySql($user_money_sql);
+
+        if(!empty(count($user_money))){
+            foreach ($user_money as $k => $v) {
+                $user_money_arr[$v['pay_openid']][] = $v;
+            }
+            foreach ($date_arr as $one_date) {
+                $day_start = strtotime($year . '-' . $one_date);
+                $day_end = strtotime("+1 day", $day_start);
+                $day_money = 0;//天消费金额
+                $user_count = 0;//天消费次数
+                if (!empty($user_money_arr[$v['pay_openid']])) {
+                    $user_money_res = $user_money_arr[$v['pay_openid']];
+                    foreach ($user_money_res as $money_one) {
+                        if (($money_one['createtime'] >= $day_start) && $money_one['createtime'] < $day_end) {
+                            $day_money = $day_money + $money_one['money'];//天消费金额
+                            $user_count = $user_count + 1;//天消费次数
+                        }
+                    }
+                }
+                //计算总数
+                $sum_money = $sum_money + $day_money;//月总消费金额
+                $sum_count = $sum_count + $user_count;//月总消费次数
+                if (!empty($user_count)) {
+                    $sum_day = $sum_day + 1;//记录消费天数
+                }
+            }
+        }
+        $data = [
+            'money' => $sum_money,
+            'day' => $sum_day,
+        ];
+        return $data;
+    }
+
+    /**
+     * 判断用户等级
+     * @param int $day_sum 月消费天数
+     * @param int $money_sum 月消费金额
+     * @return bool|int
+     */
+    protected function level($day_sum = 0,$money_sum = 0,$sup_id = 0) {
+        $rule = new MemberRuleLevel();
+        if (empty($day_sum) || empty($money_sum) || empty($sup_id)) {
+            return false;
+        }
+
+        //查询店铺是否是经销商
+        $supplier_res = Db::connect('db_mini_mall')->table('ims_yd_supplier')->where([['id','=',$sup_id]])->field('is_dist')->find();
+        if($supplier_res['is_dist'] == 1){
+            //经销商的规则
+            $where_day = [
+                ['l_day1', '<=', $day_sum],
+                ['l_day2', '>=', $day_sum],
+                ['type', '=', 2],
+            ];
+            $where_money = [
+                ['l_money1', '<=', $money_sum],
+                ['l_money2', '>=', $money_sum],
+                ['type', '=', 2],
+            ];
+        }else{
+            $where_day = [
+                ['l_day1', '<=', $day_sum],
+                ['l_day2', '>=', $day_sum],
+                ['type', '=', 1],
+            ];
+            $where_money = [
+                ['l_money1', '<=', $money_sum],
+                ['l_money2', '>=', $money_sum],
+                ['type', '=', 1],
+            ];
+        }
+        //查询天数的等级
+        $day_level_res = $rule->getInfo($where_day);
+        $day_level = !empty($day_level_res['l_level']) ? $day_level_res['l_level'] : 0;
+
+        //查询金额的等级
+        $money_level_res = $rule->getInfo($where_money);
+        $money_level = !empty($money_level_res['l_level']) ? $money_level_res['l_level'] : 0;
+
+        $level_res = intval($money_level) > intval($day_level) ? $day_level : $money_level;
+        $level = !empty($level_res) ? $level_res : 1;
+        return $level;
+    }
+
+    /**
+     * 查询会员信息
+     */
+    public function memberInfo(){
+        $param = $this->request_param;
+        $openid = !empty($param['openid']) ? $param['openid'] : sdk_return('',6,'参数错误');
+        $sup_id = !empty($param['sup_id']) ? $param['sup_id'] : sdk_return('',6,'参数错误');
+//        等级，本月消费天数，本月消费金额，等级名称，到期时间，金币数量，用户昵称，店铺名称，距离下次升级的天数和金额
+
+        //查询当月会员的等级
+        $level_month_model = new MemberMonthLevel();
+        $level_where = [
+            ['openid','=',$openid],
+            ['sup_id','=',$sup_id],
+        ];
+        $level_arr = $level_month_model->getInfoPro($level_where,'level,time_end','id desc');
+        $level = !empty($level_arr['level']) ? $level_arr['level'] : 0;
+        $time_end = !empty($level_arr['time_end']) ? $level_arr['time_end'] : 0;
+        if(time() > $time_end){
+            $level = 1;
+        }
+
+        //查询上月会员的等级
+        $last_month = date('Ym',strtotime('last month'));//上个月
+        $last_level_where = [
+            ['openid','=',$openid],
+            ['sup_id','=',$sup_id],
+            ['month','=',$last_month],
+        ];
+        $last_level_arr = $level_month_model->getInfoPro($last_level_where,'level,time_end','id desc');
+        $last_level = !empty($last_level_arr['level']) ? $last_level_arr['level'] : 0;
+        $last_time_end = !empty($last_level_arr['time_end']) ? $last_level_arr['time_end'] : 0;
+        if(time() > $last_time_end){
+            $last_level = 1;
+        }
+
+        $level = (intval($level) > intval($last_level)) ? $level : $last_level;
+        $time_end = (intval($level) > intval($last_level)) ? $time_end : $last_time_end;
+
+        //查询会员本月消费信息
+        $month_data = $this->month($sup_id,$openid);
+
+        //未使用劵的数量
+        $voucher_model = new MemberRedemptionVoucher();
+        $voucher_where = [
+            ['openid','=',$openid],
+            ['sup_id','=',$sup_id],
+//            ['day_time','=',date('Y-m-d',time())],
+            ['is_exchange','=',0],
+        ];
+        $voucher_arr = $voucher_model->getAllList($voucher_where);
+        $voucher_list = array();
+        $time = strtotime(date("Y-m-d"));//当天时间戳
+        if(!empty(count($voucher_arr))){
+            foreach ($voucher_arr as $key => $value){
+                $day_time = strtotime($value['day_time']);//领取当天的时间戳
+                if($value['type'] == 2){
+                    //当月月末
+                    $BeginDate = date('Y-m-01', strtotime(date("Y-m-d")));
+                    $effect_time = strtotime("+1 month", strtotime($BeginDate));
+                    $effect_time_date = date('Y-m-d 23:59:59',strtotime('-1 day',$effect_time));
+//                    $value['effect_time']=date('Y-m-d H:i:s',$value['update_time']);
+                    $value['effect_time'] = $effect_time_date;
+
+                    $begin_time = strtotime($BeginDate);//当月月初时间戳
+                    $end_time = strtotime($effect_time_date);//当月月末时间戳
+                    if (($day_time >= $begin_time) && ($day_time < $end_time)) {
+                        $voucher_list[] = $value;
+                    }
+                } else {
+                    $value['effect_time'] = date('Y-m-d', $value['update_time']) . ' 24:00:00';
+                    if ($day_time >= $time) {
+                        $voucher_list[] = $value;
+                    }
+                }
+            }
+        }
+        $voucher = !empty(count($voucher_list)) ? count($voucher_list) : 0;
+
+        //金币数量
+        $gold_model = new MemberGoldCount();
+        $gold_where = [
+            ['openid','=',$openid],
+            ['sup_id','=',$sup_id],
+        ];
+        $gold_arr = $gold_model->getInfoPro($gold_where,'gold_count');
+        $gold = !empty($gold_arr['gold_count']) ? $gold_arr['gold_count'] : 0;
+
+        //用户昵称
+        $member_model = new ShopMember();
+        $member_where = [
+            ['openid','=',$openid],
+        ];
+        $member_arr = $member_model->getInfoPro($member_where,'nickname');
+        $nickname = !empty($member_arr['nickname']) ? $member_arr['nickname'] : '';
+
+        //店铺名称
+        $supplier_model = new Supplier();
+        $supplier_where = [
+            ['id','=',$sup_id],
+        ];
+        $supplier_arr = $supplier_model->getInfoPro($supplier_where,'name,gift_id,is_dist');
+        $supplier = !empty($supplier_arr['name']) ? $supplier_arr['name'] : '';
+
+        //查询升级券列表
+        $gift_id = !empty($supplier_arr['gift_id']) ? $supplier_arr['gift_id'] : 0;
+        $gift_model = new YdSupplierGift();
+        $gift_where = [
+            ['id','=',$gift_id]
+        ];
+        $coupon_arr = $gift_model->getInfoPro($gift_where,'level1_title,level2_title,level3_title,level4_title');
+        if(!empty($coupon_arr['level1_title'])){
+            $coupon = [
+                [
+                    'coupon_title' => !empty($coupon_arr['level1_title']) ? $coupon_arr['level1_title'] : '',
+                    'level_title' => '普卡会员',
+                ],
+                [
+                    'coupon_title' => !empty($coupon_arr['level2_title']) ? $coupon_arr['level2_title'] : '',
+                    'level_title' => '银卡会员',
+                ],
+                [
+                    'coupon_title' => !empty($coupon_arr['level3_title']) ? $coupon_arr['level3_title'] : '',
+                    'level_title' => '金卡会员',
+                ],
+                [
+                    'coupon_title' => !empty($coupon_arr['level4_title']) ? $coupon_arr['level4_title'] : '',
+                    'level_title' => '钻石卡会员',
+                ],
+            ];
+        }else{
+            $coupon = [];
+        }
+
+        //当月的等级判断
+        $month_level = $this->level($month_data['day'],$month_data['money'],$sup_id);
+
+        //查询当月的等级名称
+        if($supplier_arr['is_dist'] == 1){
+            //经销商
+            $level_rule = [
+                ['l_level','in',[$month_level,$month_level + 1]],
+                ['type', '=', 2],
+            ];
+        }else{
+            $level_rule = [
+                ['l_level','in',[$month_level,$month_level + 1]],
+                ['type', '=', 1],
+            ];
+        }
+
+        $level_model = new MemberRuleLevel();
+        $level_title_arr = $level_model->getAllList($level_rule);
+        $level_title = !empty($level_title_arr[0]['l_title']) ? $level_title_arr[0]['l_title'] : '';//当前等级名称
+        $level_lase_title = !empty($level_title_arr[1]['l_title']) ? $level_title_arr[1]['l_title'] : '';//下一等级名称
+
+        //距离下次升级的天数和金额
+        if(!empty($level_lase_title)){
+            $next_day = $level_title_arr[1]['l_day1'] - $month_data['day'];
+            $next_money = $level_title_arr[1]['l_money1'] - $month_data['money'];
+        }else{
+            $level_lase_title = '普卡会员';
+            $next_day = 0;
+            $next_money = 0;
+        }
+
+        //判断是否需要保级
+        $is_bao_ji = 0;
+        $bao_ji_title = '';
+        $bao_ji_day = '';
+        $bao_ji_money = '';
+        $user_level = $this->getMemberLevel($openid,$sup_id);//获取用户等级
+        if($user_level > $month_level){
+            //距离保级
+            if($supplier_arr['is_dist'] == 1){
+                $bao_ji_where = [
+                    ['l_level','in',[$user_level]],
+                    ['type', '=', 2],
+                ];
+            }else{
+                $bao_ji_where = [
+                    ['l_level','in',[$user_level]],
+                    ['type', '=', 1],
+                ];
+            }
+            $level_bao_ji = $level_model->getAllList($bao_ji_where);
+            $bao_ji_title = !empty($level_bao_ji[0]['l_title']) ? $level_bao_ji[0]['l_title'] : '';
+            $bao_ji_day = $level_bao_ji[0]['l_day1'] - $month_data['day'];
+            $bao_ji_money = $level_bao_ji[0]['l_money1'] - $month_data['money'];
+            $is_bao_ji = 1;
+        }
+
+        //文案判断
+        if($supplier_arr['is_dist'] == 1){
+            //经销商
+            $next_rule = '2天1200元';
+        }else{
+            $next_rule = '2天50元';
+        }
+        if(empty($month_data['money'])){
+//            $rule = '本月累积消费0天0元，下月预计为普卡会员距普卡会员升级还需消费'.$next_rule;
+            $rule1 = '本月累积消费0天0元，下月预计为普卡会员';
+            $rule2 = '距升级普卡会员还需消费'.$next_rule;
+        }elseif($level == 5){
+            $rule1 = '本月累积消费'.$month_data['day'].'天'.$month_data['money'].'元，下月可享受钻石卡会员权益，请继续保持哦~';
+            $rule2 = '';
+        }else{
+//            $rule = '本月累积消费'.$month_data['day'].'天'.$month_data['money'].'元，下月预计为'.$level_lase_title.'距'.$level_lase_title.'升级还需消费';
+            if(empty($level_lase_title)){
+                $level_lase_title = '普卡会员';
+            }
+            $rule1 = '本月累积消费'.$month_data['day'].'天'.$month_data['money'].'元，下月预计为'.$level_lase_title;
+            $rule2 = '距升级'.$level_lase_title.'还需消费';
+            $rule3 = '距'.$bao_ji_title.'保级还需消费';
+//            2天50元
+            $next_rule = '';
+            if($is_bao_ji == 1){
+                if($bao_ji_day > 0){
+                    $next_rule .= $bao_ji_day.'天';
+                }
+                if($bao_ji_money > 0){
+                    $next_rule .= $bao_ji_money.'元';
+                }
+                $rule2 = $rule3.$next_rule;
+            }else{
+                if($next_day > 0){
+                    $next_rule .= $next_day.'天';
+                }
+                if($next_money > 0){
+                    $next_rule .= $next_money.'元';
+                }
+                $rule2 .= $next_rule;
+            }
+        }
+
+        //查询升级数据
+        $up_level_arr = Db::connect('db_mini_mall')->table('ims_member_level_log')->where([['sup_id','=',$sup_id],['openid','=',$openid]])->order('id','desc')->find();
+        $up_level = !empty($up_level_arr['level2']) ? $up_level_arr['level2'] : 1;
+
+        //组装数据
+        $data = [
+            'level' => !empty($level) ? $level : 1,
+            'up_level' => $up_level,
+            'month_level' => $month_level.'',
+            'day' => $month_data['day'],
+            'money' => $month_data['money'],
+            'next_day' => $next_day,
+            'next_money' => $next_money,
+            'level_title' => $level_title,
+            'level_next_title' => $level_lase_title,
+            'time_end' => date('Y/m/d',strtotime('-1 day',$time_end)),
+            'gold' => $gold,
+            'nickname' => $nickname,
+            'supplier' => $supplier,
+            'voucher' => $voucher,
+            'coupon' => $coupon,
+            'rule1' => $rule1,
+            'rule2' => $rule2,
+            'level_rule' => '本月消费',
+            'level_money' => $month_data['day'].'天'.$month_data['money'].'元',
+            'next_rule' => $next_rule,
+            'bao_ji_title' => $bao_ji_title,
+            'bao_ji_day' => $bao_ji_day,
+            'bao_ji_money' => $bao_ji_money,
+            'is_bao_ji' => $is_bao_ji,
+        ];
+        sdk_return($data, 1, 'success');
+    }
+
+    public function isUpgrade(){
+        $param = $this->request_param;
+        $openid = !empty($param['openid']) ? $param['openid'] : sdk_return('',6,'参数错误');//用户openID
+        $sup_id = !empty($param['sup_id']) ? $param['sup_id'] : sdk_return('',6,'参数错误');//店铺ID
+        $order_sn = !empty($param['order_sn']) ? $param['order_sn'] : sdk_return('',6,'参数错误');//当前订单号
+        //根据已知条件判断当前用户是否升级
+        $level_log_model = new MemberLevelLog();
+        $level_log_where = [
+            ['openid','=',$openid],
+            ['sup_id','=',$sup_id],
+            ['order_sn','=',$order_sn]
+        ];
+        $is_upgrade = $level_log_model->getInfo($level_log_where);
+        if(!empty($is_upgrade['level2'])){
+            if(($is_upgrade['level2'] == 1) || ($is_upgrade['level2'] == 0)){
+                $data = [
+                    'is_upgrade' => '0'
+                ];
+            }else{
+                $data = [
+                    'is_upgrade' => '1'
+                ];
+            }
+        }else{
+            $data = [
+                'is_upgrade' => '0'
+            ];
+        }
+
+        //2019年9月7日15:52:41，设置永远不升级。当下次生效的时候需要删除此段代码
+//        $data = [
+//            'is_upgrade' => '0'
+//        ];
+
+        sdk_return($data, 1, 'success');
+    }
+
+    //水晶明细
+    public function crystal(){
+        $param = $this->request_param;
+        $sup_id = !empty($param['sid']) ? $param['sid'] : sdk_return('',6,'参数错误');
+        //$list = Db::connect('db_mini_mall')->table('ims_yd_supplier_crystal_log')->field([Db::raw('from_unixtime(addtime,"%Y/%m/%d") as day'),'openid','crystal',Db::raw('SUM(crystal) as total'),Db::raw()])->where('supplier_id',$sup_id)->group('day')->select();
+        $supplier= Db::connect('db_mini_mall')->table('ims_yd_supplier')->where('id',$sup_id)->find();
+        $list = Db::connect('db_mini_mall')->table('ims_yd_supplier_crystal_log')->field([Db::raw('from_unixtime(addtime,"%Y/%m/%d") as day'),'openid','crystal','type'])->where('supplier_id',$sup_id)->order('addtime desc')->select();
+        $arr =[];
+        foreach ($list as $key => $v) {
+            $arr[$v['day']][]=$v;
+        }
+        $result =[];
+        foreach ($arr as $key => $value) {
+            $total =0;
+            $member = 0;
+            $level = 0;
+            $openid=[];
+            foreach ($value as $k => $v) {
+                $total+=$v['crystal'];
+                if($v['type'] == 1){
+                    $member++;
+                }else{
+                    $level++;
+                }
+                $openid[]=$v['openid'];
+            }
+            $openids = array_unique($openid);
+            //今日支付人
+            $pay = Db::connect('db_mini_mall')->table('ims_ewei_shop_member_log')->where('openid = "'.$supplier['openid'].'" and status = 1 and createtime >'.strtotime($key).' and createtime <= '.strtotime($key.'+1 day'))->column('pay_openid');
+            $pay = array_unique($pay);
+            $unLevel = 0;
+            foreach ($pay as $ke => $val) {
+                if(!in_array($val, $openids)){
+                        $unLevel++;
+                }
+            }
+            $result[] = [
+                'day'=>$key,
+                'member'=>$member,
+                'level'=>$level,
+                'total'=>$total,
+                'unLevel'=>$unLevel,
+                'crystal'=>$unLevel*3
+            ];
+        }
+       sdk_return($result,1,'请求成功');
+    }
+
+    //水晶明细详情
+    public function crystalInfo() {
+        $param = $this->request_param;
+        $sup_id = !empty($param['sid']) ? $param['sid'] : sdk_return('', 6, '参数错误');
+        $day = !empty($param['day']) ? $param['day'] : sdk_return('', 6, '参数错误');
+        $start = strtotime($day);
+        $end = strtotime($day . ' 23:59:59');
+        $status = isset($param['status']) ? $param['status'] : 1;//1:消费；2：升级；3无效
+        if ($status == 3) {
+            $supplier = Db::connect('db_mini_mall')->table('ims_yd_supplier')->where('id', $sup_id)->find();
+            $where = [
+                ['a.openid','=',$supplier['openid']],
+                ['a.status','=',1],
+                ['a.createtime','>',$start],
+                ['a.createtime','<=',$end],
+            ];
+            $list_old = Db::connect('db_mini_mall')->table('ims_ewei_shop_member_log')->alias('a')->leftJoin('ims_ewei_shop_member b','a.pay_openid = b.openid')->field('a.pay_openid openid,b.nickname,b.avatar,b.gender,a.money')->where($where)->select();
+            $list = array();
+            if(!empty(count($list_old))){
+                $arr_openid = [];
+                foreach ($list_old as $key => $value){
+                    //查询用户的名称和手机号
+                    $user_address = Db::connect('db_mini_mall')->table('ims_ewei_shop_member_address')->where([['openid','=',$value['openid']]])->order('id desc')->find();
+                    $value['realname'] = $user_address['realname'];
+                    $value['mobile'] = $user_address['mobile'];
+                    //查询用户等级
+//                    $user_level = Db::connect('db_mini_mall')->table('ims_member_month_level')->where([['sup_id','=',$sup_id],['openid','=',$value['openid']]])->order('id desc')->find();
+                    $user_level = $this->getMemberLevel($value['openid'],$sup_id);
+                    if($user_level > 1){
+                        continue;
+                    }
+                    $value['level'] = $user_level;
+                    if(!in_array($value['openid'],$arr_openid)){
+                        $arr_openid[] = $value['openid'];
+                    }else{
+                        continue;
+                    }
+                    $list[] = $value;
+                }
+            }
+        } else {
+            $where = [
+                ['a.supplier_id','=',$sup_id],
+                ['a.addtime','>',$start],
+                ['a.addtime','<=',$end],
+                ['a.type','=',$status],
+            ];
+            $list = Db::connect('db_mini_mall')->table('ims_yd_supplier_crystal_log')->alias('a')->leftJoin('`ims_ewei_shop_member` b','a.openid = b.openid')->field('a.`openid`, a.`crystal`, a.`type`, b.`nickname`, b.`avatar`, b.`gender`, from_unixtime(a.addtime) time, a.crystal_info')->where($where)->select();
+            foreach ($list as $key => &$value) {
+                //查询用户等级
+//                $user_level = Db::connect('db_mini_mall')->table('ims_member_month_level')->where([['sup_id','=',$sup_id],['openid','=',$value['openid']]])->order('id desc')->find();
+//                $value['level'] = $user_level['level'];
+                $value['level'] = $this->getMemberLevel($value['openid'],$sup_id);
+                //查询用户的名称和手机号
+                $user_address = Db::connect('db_mini_mall')->table('ims_ewei_shop_member_address')->where([['openid','=',$value['openid']]])->order('id desc')->find();
+                $value['realname'] = $user_address['realname'];
+                $value['mobile'] = $user_address['mobile'];
+                //根据订单号查询消费金额
+                $user_money = Db::connect('db_mini_mall')->table('ims_ewei_shop_member_log')->where([['logno','=',$value['crystal_info']]])->order('id desc')->find();
+                $value['money'] = !empty($user_money['money']) ? $user_money['money'] : '暂无数据';
+                if ($value['type'] == 2) {
+                    switch ($value['crystal']) {
+                        case '10':
+                            $value['levelmsg'] = '普卡';
+                            $value['level'] = 2;
+                            break;
+                        case '30':
+                            $value['levelmsg'] = '银卡';
+                            $value['level'] = 3;
+                            break;
+                        case '50':
+                            $value['levelmsg'] = '金卡';
+                            $value['level'] = 4;
+                            break;
+                        case '100':
+                            $value['levelmsg'] = '钻石卡';
+                            $value['level'] = 5;
+                            break;
+                        default:
+                            # code...
+                            break;
+                    }
+                } else {
+
+                    switch ($value['level']) {
+                        case '2':
+                            $value['levelmsg'] = '普卡';
+                            break;
+                        case '3':
+                            $value['levelmsg'] = '银卡';
+                            break;
+                        case '4':
+                            $value['levelmsg'] = '金卡';
+                            break;
+                        case '5':
+                            $value['levelmsg'] = '钻石卡';
+                            break;
+                        default:
+                            # code...
+                            break;
+                    }
+                }
+            }
+        }
+        sdk_return($list, 1, 'success');
+    }
+
+    /**
+     * 查询用户等级
+     * @param string $openid
+     * @param string $sup_id
+     * @return int|mixed
+     * @throws \think\db\exception\DataNotFoundException
+     * @throws \think\db\exception\ModelNotFoundException
+     * @throws \think\exception\DbException
+     */
+    protected function getMemberLevel($openid = '',$sup_id = ''){
+        //查询当月会员的等级
+        $level_month_model = new MemberMonthLevel();
+        $level_where = [
+            ['openid','=',$openid],
+            ['sup_id','=',$sup_id],
+        ];
+        $level_arr = $level_month_model->getInfoPro($level_where,'level,time_end','id desc');
+        $level = !empty($level_arr['level']) ? $level_arr['level'] : 0;
+        $time_end = !empty($level_arr['time_end']) ? $level_arr['time_end'] : 0;
+        if(time() > $time_end){
+            $level = 1;
+        }
+
+        //查询上月会员的等级
+        $last_month = date('Ym',strtotime('last month'));//上个月
+        $last_level_where = [
+            ['openid','=',$openid],
+            ['sup_id','=',$sup_id],
+            ['month','=',$last_month],
+        ];
+        $last_level_arr = $level_month_model->getInfoPro($last_level_where,'level,time_end','id desc');
+        $last_level = !empty($last_level_arr['level']) ? $last_level_arr['level'] : 0;
+        $last_time_end = !empty($last_level_arr['time_end']) ? $last_level_arr['time_end'] : 0;
+        if(time() > $last_time_end){
+            $last_level = 1;
+        }
+
+        $level = (intval($level) > intval($last_level)) ? $level : $last_level;
+        $time_end = (intval($level) > intval($last_level)) ? $time_end : $last_time_end;
+        return $level;
+    }
+
+    /**
+     * 查询当前用户在点位表中是否有手机号
+     */
+    public function getMemberPhone(){
+//        potential_customer
+        $param = $this->request->param();
+        $openid = !empty($param['user_openid']) ? $param['user_openid'] : sdk_return('',6,'参数缺失');//openID
+        $openid = is_sns($openid);
+        $phone = Db::connect('db_btj_new')->table('potential_customer')->where('xcx_openid = "'.$openid.'"')->order('create_time','desc')->field('telphone')->find();
+        if(!empty($phone['telphone'])){
+            $data['is_phone'] = 1;
+            $data['phone'] = $phone['telphone'];
+        }else{
+            $data['is_phone'] = 0;
+            $data['phone'] = 0;
+        }
+
+        $data['is_phone'] = 1;//wm 2019.11.19 20:45 项目要求增加此代码
+
+        sdk_return($data,'1','获取成功');
+    }
+
+    /**
+     * 更新用户的手机号
+     */
+    public function setUserPhone(){
+        $param = $this->request->param();
+        $openid = !empty($param['user_openid']) ? $param['user_openid'] : sdk_return('',6,'参数缺失');//用户的openID
+        //$user_phone = !empty($param['user_phone']) ? $param['user_phone'] : sdk_return('',6,'参数缺失');//用户的手机号
+        $openid = is_sns($openid);
+        //验证手机号
+        //$is_mobile = $this->is_mobile($user_phone);
+
+        if(!isset($param['encryptedData']) || empty($encryptedData = $param['encryptedData'])){
+            return sdk_return('',6,'参数缺失');
+        }
+
+        if(!isset($param['iv']) || empty($iv = $param['iv'])){
+            return sdk_return('',6,'参数缺失');
+        }
+
+        if(!isset($param['sessionKey']) || empty($sessionKey = $param['sessionKey'])){
+            return sdk_return('',6,'参数缺失');
+        }
+
+        //解密用户登录信息，获取手机号
+        $wxapp = new Wxapp();
+        $errCode = $wxapp->decryptData($sessionKey, $encryptedData, $iv, $data);
+
+        $data = json_decode($data, true);
+
+        if($errCode['code'] != 0){
+            $telphone = 1111111111;
+        }else{
+            $telphone = empty($data['phoneNumber']) ? $data['purePhoneNumber'] : $data['phoneNumber'];
+        }
+
+        //更新potential_customer
+        Db::connect('db_btj_new')->table('potential_customer')->where('xcx_openid = "'.$openid.'"')->update(['telphone'=>$telphone]);
+        //更新shop_member表
+        Db::connect('db_mini_mall')->table('ims_ewei_shop_member')->where('openid = "'.$openid.'"')->update(['telphone'=>$telphone]);
+
+        return sdk_return('',1,'修改成功');
+    }
+
+    /**
+     * 验证输入的手机号码
+     * @access  public
+     * @param   string      $user_mobile      需要验证的手机号码
+     * @return bool
+     */
+    function is_mobile($user_mobile){
+        $chars = "/^1[3456789]{1}\d{9}$/";
+        if (preg_match($chars, $user_mobile)){
+            return true;
+        }else{
+            return false;
+        }
+    }
+
+}

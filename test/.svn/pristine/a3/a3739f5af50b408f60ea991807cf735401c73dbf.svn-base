@@ -1,0 +1,306 @@
+<?php
+class OrderUpdateRequest
+{
+	/** 
+	 * 店铺编号
+	 **/
+	private $shopid;
+	
+	/** 
+	 * 订单编号
+	 **/
+	private $tid;
+	
+	/** 
+	 * 下单时间
+	 **/
+	private $order_time;
+	
+	/** 
+	 * 付款时间
+	 **/
+	private $payment_time;
+	
+	/** 
+	 * 物流ID
+	 **/
+	private $express_id;
+	
+	/** 
+	 * 买家昵称
+	 **/
+	private $buyer_nick;
+	
+	/** 
+	 * 收件省份
+	 **/
+	private $receiver_state;
+	
+	/** 
+	 * 收件城市
+	 **/
+	private $receiver_city;
+	
+	/** 
+	 * 收件区县
+	 **/
+	private $receiver_district;
+	
+	/** 
+	 * 收件地址
+	 **/
+	private $receiver_address;
+	
+	/** 
+	 * 收件人姓名
+	 **/
+	private $receiver_name;
+	
+	/** 
+	 * 收件人电话
+	 **/
+	private $receiver_mobile;
+	
+	/** 
+	 * 配送费用
+	 **/
+	private $total_fee;
+	
+	/** 
+	 * 实付总金额
+	 **/
+	private $paymnet;
+	
+	/** 
+	 * ，买家留言
+	 **/
+	private $buyer_message;
+	
+	/** 
+	 * ，卖家备注
+	 **/
+	private $seller_memo;
+	
+	/** 
+	 * ，卖家备注旗帜
+	 **/
+	private $seller_flag;
+	private $apiParas = array();
+	
+	public function setShopid($shopid)
+	{
+		$this->shopid = $shopid;
+		$this->apiParas["shopid"] = $shopid;
+	}
+
+	public function getShopid()
+	{
+		return $this->shopid;
+	}
+
+	public function setTid($tid)
+	{
+		$this->tid = $tid;
+		$this->apiParas["tid"] = $tid;
+	}
+
+	public function getTid()
+	{
+		return $this->tid;
+	}
+
+	public function setOrderTime($order_time)
+	{
+		$this->order_time = $order_time;
+		$this->apiParas["order_time"] = $order_time;
+	}
+
+	public function getOrderTime()
+	{
+		return $this->order_time;
+	}
+
+	public function setPaymentTime($payment_time)
+	{
+		$this->paymnet_time = $payment_time;
+		$this->apiParas["payment_time"] = $payment_time;
+	}
+
+	public function getPaymentTime()
+	{
+		return $this->payment_time;
+	}
+
+	public function putOtherTextParam($key, $value) {
+		$this->apiParas[$key] = $value;
+		$this->$key = $value;
+	}
+	
+	public function setBuyerNick($buyer_nick)
+	{
+		$this->buyer_nick = $buyer_nick;
+		$this->apiParas["buyer_nick"] = $buyer_nick;
+	}
+
+	public function getBuyerNick()
+	{
+		return $this->buyer_nick;
+	}
+	
+	public function setExpressId($express_id)
+	{
+		$this->express_id = $express_id;
+		$this->apiParas["express_id"] = $express_id;
+	}
+
+	public function getExpressId()
+	{
+		return $this->express_id;
+	}
+	
+	public function setReceiverState($receiver_state)
+	{
+		$this->receiver_state = $receiver_state;
+		$this->apiParas["receiver_state"] = $receiver_state;
+	}
+
+	public function getReceiverState()
+	{
+		return $this->receiver_state;
+	}
+	
+	public function setReceiverCity($receiver_city)
+	{
+		$this->receiver_city = $receiver_city;
+		$this->apiParas["receiver_city"] = $receiver_city;
+	}
+
+	public function getReceiverCity()
+	{
+		return $this->receiver_city;
+	}
+	
+	public function setReceiverDistrict($receiver_district)
+	{
+		$this->receiver_district = $receiver_district;
+		$this->apiParas["receiver_district"] = $receiver_district;
+	}
+
+	public function getReceiverDistrict()
+	{
+		return $this->receiver_district;
+	}
+	
+	public function setReceiverAddress($receiver_address)
+	{
+		$this->receiver_address = $receiver_address;
+		$this->apiParas["receiver_address"] = $receiver_address;
+	}
+
+	public function getReceiverAddress()
+	{
+		return $this->receiver_address;
+	}
+	
+	public function setReceiverName($receiver_name)
+	{
+		$this->receiver_name = $receiver_name;
+		$this->apiParas["receiver_name"] = $receiver_name;
+	}
+
+	public function getReceiverName()
+	{
+		return $this->receiver_name;
+	}
+	
+	public function setReceiverMobile($receiver_mobile)
+	{
+		$this->receiver_mobile = $receiver_mobile;
+		$this->apiParas["receiver_mobile"] = $receiver_mobile;
+	}
+
+	public function getReceiverMobile()
+	{
+		return $this->receiver_mobile;
+	}
+	
+	public function setPostFee($post_fee)
+	{
+		$this->post_fee = $post_fee;
+		$this->apiParas["post_fee"] = $post_fee;
+	}
+
+	public function getPostFee()
+	{
+		return $this->post_fee;
+	}
+	
+	public function setPaymnet($payment)
+	{
+		$this->payment = $payment;
+		$this->apiParas["payment"] = $payment;
+	}
+
+	public function getPaymnet()
+	{
+		return $this->payment;
+	}
+	
+	public function setBuyerMessage($buyer_message)
+	{
+		$this->buyer_message = $buyer_message;
+		$this->apiParas["buyer_message"] = $buyer_message;
+	}
+
+	public function getBuyerMessage()
+	{
+		return $this->buyer_message;
+	}
+	
+	public function setSellerMemo($seller_memo)
+	{
+		$this->seller_memo = $seller_memo;
+		$this->apiParas["seller_memo"] = $seller_memo;
+	}
+
+	public function getSellerMemo()
+	{
+		return $this->seller_memo;
+	}
+	
+	public function setSellerFlag($seller_flag)
+	{
+		$this->seller_flag = $seller_flag;
+		$this->apiParas["seller_flag"] = $seller_flag;
+	}
+
+	public function getSellerFlag()
+	{
+		return $this->seller_flag;
+	}
+	
+	public function getApiMethodName()
+	{
+		return "order.update";
+	}
+	
+	public function getApiParas()
+	{
+		return $this->apiParas;
+	}
+	
+	public function check()
+	{
+		RequestCheckUtil::checkNotNull($this->tid,"tid");
+		RequestCheckUtil::checkNotNull($this->shopid,"shopid");
+		RequestCheckUtil::checkNotNull($this->order_time,"order_time");
+		RequestCheckUtil::checkNotNull($this->buyer_nick,"buyer_nick");
+		RequestCheckUtil::checkNotNull($this->receiver_state,"receiver_state");
+		RequestCheckUtil::checkNotNull($this->receiver_city,"receiver_city");
+		RequestCheckUtil::checkNotNull($this->receiver_district,"receiver_district");
+		RequestCheckUtil::checkNotNull($this->receiver_address,"receiver_address");
+		RequestCheckUtil::checkNotNull($this->receiver_name,"receiver_name");
+		RequestCheckUtil::checkNotNull($this->receiver_mobile,"receiver_mobile");
+		RequestCheckUtil::checkNotNull($this->paymnet,"paymnet");
+	}
+}

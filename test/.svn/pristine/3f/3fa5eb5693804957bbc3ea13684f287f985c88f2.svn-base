@@ -1,0 +1,47 @@
+<?php
+class StoreQueryRequest
+{
+	private $order_id;
+	
+	private $order_type;
+	
+	private $apiParas = array();
+	
+	public function setOrderId($order_id)
+	{
+		$this->order_id = $order_id;
+		$this->apiParas["order_id"] = $order_id;
+	}
+
+	public function getOrderId()
+	{
+		return $this->order_id;
+	}
+	
+	public function setOrderType($order_type)
+	{
+		$this->order_type = $order_type;
+		$this->apiParas["order_type"] = $order_type;
+	}
+
+	public function getOrderType()
+	{
+		return $this->order_type;
+	}
+	
+	public function getApiMethodName()
+	{
+		return "shanhai.store.query";
+	}
+	
+	public function getApiParas()
+	{
+		return $this->apiParas;
+	}
+	
+	public function check()
+	{
+		//RequestCheckUtil::checkNotNull($this->page_index,"page_index");
+		//RequestCheckUtil::checkNotNull($this->page_size,"page_size");
+	}
+}

@@ -1,0 +1,271 @@
+<?php
+
+namespace app\api\controller;
+
+use app\api\model\CommonBaseModel as CommonBase;
+use app\api\model\CommonBtjNewModel;
+use think\Loader;
+use think\Db;
+use app\api\model\ydxq\Supplier;
+
+class Home extends BaseController
+{
+    protected $m_ProjectModel;
+
+    public function __construct()
+    {
+        parent::__construct();
+
+    }
+
+    /**
+     * $ huangke 首页智能推荐
+     */
+    public function getList()
+    {
+        $param = input('get.');
+        $openids = $param['openid'];
+        $supplier_id = !empty($param['supplier_id']) ? $param['supplier_id'] : 0;
+        if (empty($openids)) {
+            return json_encode(['status' => 1, 'msg' => 'openid不能为空']);
+        }
+        $is_sns = strstr($openids,'sns_wa_');
+        if(!$is_sns){
+            $openids =   'sns_wa_'.$openids;
+        }
+        $page = $param['page'] > 0 ? $param['page'] - 1 : 0;
+        $star = $page * 10;
+        $end = $star + 10;
+
+        if(empty($supplier_id)){
+            //根据openID查询是否有店铺
+            $supplier_model = new Supplier();
+            $supplier_where = [
+                ['openid','=',$openids],
+            ];
+            $suppler_res = $supplier_model->getInfo($supplier_where);
+            if(!empty($suppler_res['id'])){
+                $supplier_id = 461;
+            }
+        }
+
+        $unionid = Db::connect('db_mini_mall')->table('ims_ewei_shop_member')->where('openid',$openids)->value('unionid');
+        if (empty($unionid)) {
+            return json_encode(['status' => 1, 'msg' => '此用户不存在']);
+        }
+
+        $sql = "select * from ims_introduce_log where unionid = '".$unionid."' and is_introduce = 1 and goods_id > 0 and status = 1 limit $star,$end";
+
+        $list = Db::connect('db_mini_mall')->query($sql);
+        if($list){
+            $goodsids = array_column($list,'goods_id');
+            $goodsids = implode(',',$goodsids);
+
+            $sql = "select g.id,g.title,g.thumb,g.marketprice as h_price,sg.supplier_price as marketprice,g.total,g.skuid,g.salesreal,g.bb_start_count,g.bb_end_count from ims_yd_supplier_goods sg left join ims_ewei_shop_goods g on sg.goods_id=g.id where sg.supplier_id=$supplier_id and g.status=1 and g.deleted=0 and sg.status=1 and g.total > 0 and g.id IN ($goodsids) and g.skuid <> '' group by g.id ORDER BY g.sales DESC";
+
+//            echo $sql;exit;
+
+            $data = Db::connect('db_mini_mall')->query($sql);
+            foreach ($data as $k => $v){
+                $arr = Db::connect('db_mini_mall')->table('ims_ewei_shop_member_cart')->where('openid',$openids)->where('deleted',0)->where('goodsid',$v['id'])->find();
+                if($arr){
+                    $data[$k]['cart_total'] = $arr['total'];
+                    $data[$k]['cart_id'] = $arr['id'];
+                }else{
+                    $data[$k]['cart_total'] = 0;
+                    $data[$k]['cart_id'] = 0;
+                }
+                $data[$k]['thumb'] = imgSrc($v['thumb']);
+                //查询规格
+                $data[$k]['bb_spec'] = '';
+                $one_goods_id = Db::connect('db_mini_mall')->table('ims_bb_sku')->where([['id','=',$v['skuid']]])->field('goods_id')->find();
+                if(!empty($one_goods_id)){
+                    $spec = Db::connect('db_mini_mall')->table('ims_bb_goods_item')->where([['id','=',$one_goods_id['goods_id']]])->field('content')->find();
+                    if(!empty($spec)){
+                        $data[$k]['bb_spec'] = $spec['content'];
+                    }
+                }
+                //处理销量
+                $data[$k]['salesreal'] = ($v['salesreal'] * 10) + rand(0,10);
+                //查询商品报价价格
+                $hbsj_data = Db::connect('db_mini_mall')->table('ims_bb_price_list')->alias('a')->leftJoin('ims_bb_channel b','a.channel_id = b.id')->field('a.price,b.c_name')->where([['a.sku_id','=',$v['skuid']]])->select();
+                $goods_channel_arr = array();
+                if(!empty(count($hbsj_data))){
+                    foreach ($hbsj_data as $c_k => $c_v){
+                        $channel_arr = array();
+                        $channel_arr['c_name'] = $c_v['c_name'];
+                        $channel_arr['price'] = $c_v['price'];
+                        $goods_channel_arr[] = $channel_arr;
+                    }
+                }
+                $data[$k]['goods_channel_arr'] = $goods_channel_arr;
+                //查询报价数量
+                $hbsj_data = Db::connect('db_mini_mall')->table('ims_bb_city_sku')->where([['sku_id','=',$v['skuid']]])->find();
+                $data[$k]['goods_channel_count'] = !empty($hbsj_data['channel_count']) ? $hbsj_data['channel_count'] : 0;
+            }
+        }else{
+            return json_encode(['status' => 1, 'msg' => '暂无数据']);
+        }
+
+        if ($data) {
+            return json_encode(['status' => 0, 'msg' => '获取成功', 'data' => $data]);
+        } else {
+            return json_encode(['status' => 1, 'msg' => '获取失败']);
+        }
+
+        return view();
+    }
+
+    //扫码进入小程序绑定小程序与点位(作废)
+    public function qrcodeBind(){
+        $param = input('get.');
+        $openid = 'sns_wa_'.$param['user_openid'];
+        $customer_id = $param['customer_id'];
+        if(empty($openid)){
+            sdk_return('',1,'openid不能为空');
+        }
+        if(empty($customer_id)){
+            sdk_return('',1,'customer_id不能为空');
+        }
+        //判断当前点位是否有小程序openid
+        $info = Db::connect('db_mall_erp')
+            ->table('potential_customer')
+            ->field('xcx_openid,service_id')
+            ->where('id',$customer_id)
+            ->find();
+        if($info['service_id'] > 0){
+            Db::connect('db_mini_mall')
+                ->table('ims_ewei_shop_member')
+                ->where('openid',$openid)
+                ->update(['admin_user_id'=>$info['service_id']]);
+        }
+        if(!empty($info['xcx_openid'])){
+            if($openid != $info['xcx_openid']){
+                //判断是否已加入
+                $r = Db::connect('db_mall_erp')
+                    ->table('potential_customer')
+                    ->where('xcx_openid',$openid)
+                    ->count();
+                //获取用户信息
+                $data = Db::connect('db_mini_mall')
+                    ->table('ims_ewei_shop_member')
+                    ->where('comefrom','sns_wa')
+                    ->where('openid',$openid)
+                    ->find();
+                if($r == 0){
+                    $res = Db::connect('db_mall_erp')
+                        ->table('potential_customer')
+                        ->insert(['xcx_openid'=>$openid,
+                            'wx_name'=>$data['nickname'] ? $data['nickname'] : '暂无',
+                            'header_url'=>$data['avatar'] ? $data['avatar'] : '暂无',
+                            'service_id'=>$info['service_id'] > 0 ? $info['service_id'] : 0,
+                            'parent_id'=>$customer_id]);
+                }else{
+                    $res = Db::connect('db_mall_erp')
+                        ->table('potential_customer')
+                        ->where('xcx_openid',$openid)
+                        ->update(['wx_name'=>$data['nickname'] ? $data['nickname'] : '暂无',
+                            'header_url'=>$data['avatar'] ? $data['avatar'] : '暂无',
+                            'service_id'=>$info['service_id'] > 0 ? $info['service_id'] : 0,
+                            'parent_id'=>$customer_id]);
+                }
+            }
+        }else{
+            //清空此openid
+            @Db::connect('db_mall_erp')
+                ->table('potential_customer')
+                ->where('xcx_openid',$openid)
+                ->update(['xcx_openid'=>null]);
+            //赋予openid
+            Db::connect('db_mall_erp')
+                ->table('potential_customer')
+                ->where('id',$customer_id)
+                ->update(['xcx_openid'=>$openid]);
+        }
+        sdk_return('',0);
+    }
+
+    //扫码添加成员接口处理
+    public function qrcodeBinds(){
+        $param = input('get.');
+        $openid = 'sns_wa_'.$param['user_openid'];
+        $code_id = $param['code_id'];
+        if(empty($openid)){
+            sdk_return('',1,'openid不能为空');
+        }
+        if(empty($code_id)){
+            sdk_return('',1,'code_id不能为空');
+        }
+        //获取此二维码绑定点位id
+        $customer = Db::connect('db_mall_erp')
+            ->table('potential_customer')
+            ->where('bd_code',$code_id)
+            ->where('parent_id',0)
+            ->where('is_validity',1)
+            ->find();
+        if(!$customer){
+            sdk_return('',1,'此二维码未激活');
+        }
+        //获取此openid有无点位信息
+        $info = Db::connect('db_mall_erp')
+            ->table('potential_customer')
+            ->where('xcx_openid',$openid)
+            ->where('is_validity',1)
+            ->find();
+        if($info){//有此openid点位
+            if($info['id'] == $customer['id']){//此openid所在点位与二维码绑定点位不同
+                if($info['service_id'] != $customer['service_id']){//两个点位负责人不相同
+                    //写入审核表
+                    Db::connect('db_mall_erp')
+                        ->table('btj_customer_examine')
+                        ->insert(['user_id'=>$customer['service_id'],
+                            'openid'=>$openid,
+                            'one_id'=>$info['id'],
+                            'two_id'=>$customer['id'],
+                            'type'=>0,
+                            'createtime'=>time()]);
+                }
+            }
+        }else{//无此openid点位
+            //获取用户信息
+            $data = Db::connect('db_mini_mall')
+                ->table('ims_ewei_shop_member')
+                ->where('openid',$openid)
+                ->find();
+            if($customer['xcx_openid']){//二维码绑定点位已有openid创建子集
+                Db::connect('db_mall_erp')
+                    ->table('potential_customer')
+                    ->insert(['xcx_openid'=>$openid,
+                        'wx_name'=>$data['nickname'] ? $data['nickname'] : '暂无',
+                        'header_url'=>$data['avatar'] ? $data['avatar'] : '暂无',
+                        'service_id'=>$customer['service_id'] > 0 ? $customer['service_id'] : 0,
+                        'parent_id'=>$customer['id']]);
+            }else{//二维码绑定点位无openid
+                Db::connect('db_mall_erp')
+                    ->table('potential_customer')
+                    ->where('id',$customer['id'])
+                    ->update(['wx_name'=>$data['nickname'] ? $data['nickname'] : '暂无',
+                        'header_url'=>$data['avatar'] ? $data['avatar'] : '暂无',
+                        'xcx_openid'=>$openid]);
+            }
+            //该成员写入点位成员表;
+            $res = Db::connect('db_mall_erp')
+                ->table('potential_customer_user')
+                ->where('openid',$openid)
+                ->count();
+            if($res == 0){
+                Db::connect('db_mall_erp')
+                    ->table('potential_customer_user')
+                    ->insert(['wx_name'=>$data['nickname'] ? $data['nickname'] : '暂无',
+                        'header_url'=>$data['avatar'] ? $data['avatar'] : '暂无',
+                        'openid'=>$openid,
+                        'customer_id'=>$customer['id'],
+                        'createtime'=>time()]);
+            }
+        }
+
+        sdk_return('',0);
+    }
+
+
+}

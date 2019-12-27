@@ -1,0 +1,55 @@
+<?php
+class OrderRefundRequest
+{
+	/** 
+	 * 订单编号
+	 **/
+	private $tid;
+	
+	/** 
+	 * 退款状态
+	 **/
+	private $refund_status;
+	
+	
+	private $apiParas = array();
+	
+
+	public function setTid($tid)
+	{
+		$this->tid = $tid;
+		$this->apiParas["tid"] = $tid;
+	}
+
+	public function getTid()
+	{
+		return $this->tid;
+	}
+	
+	public function setRefundStatus($refund_status)
+	{
+		$this->refund_status = $refund_status;
+		$this->apiParas["refund_status"] = $refund_status;
+	}
+
+	public function getRefundStatus()
+	{
+		return $this->refund_status;
+	}
+	
+	public function getApiMethodName()
+	{
+		return "order.refund";
+	}
+	
+	public function getApiParas()
+	{
+		return $this->apiParas;
+	}
+	
+	public function check()
+	{
+		RequestCheckUtil::checkNotNull($this->tid,"tid");
+		RequestCheckUtil::checkNotNull($this->shopid,"refund_status");
+	}
+}

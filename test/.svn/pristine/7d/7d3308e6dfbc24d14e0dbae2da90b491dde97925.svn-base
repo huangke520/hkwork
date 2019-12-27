@@ -1,0 +1,731 @@
+<?php
+/**
+ * ceadr 2019-08-13
+ */
+
+namespace app\api\controller;
+//跨域设置
+header("Access-Control-Allow-Origin: *");
+header("Access-Control-Allow-Methods: POST, GET");
+//header('Access-Control-Allow-Headers:x-requested-with,content-type');
+require_once __DIR__ . '/../../../vendor/erp_sdk/TopSdk.php';
+
+use app\api\model\ydhl\ParityProduct as ParityProductModel;
+use app\api\model\btjnew\Sign as SignModel;
+use app\api\model\ydxq\Supplier;
+use app\api\model\btjnew\Sign;
+use app\api\model\ydxq\ShopOrder;
+use app\api\model\ydxq\ShopOrderGoods;
+use think\Db;
+use think\Exception;
+
+class H5Order extends BaseController {
+
+    private $ydxq_goods_model;
+    private $appKey;
+    private $secretKey;
+    private $serverUrl;
+    private $sessionKey;
+
+    public function __construct(){
+        //error_reporting(E_ALL & ~E_NOTICE);
+        header("Access-Control-Allow-Origin: *");
+        header("Access-Control-Allow-Methods: POST, GET");
+
+        parent::__construct();
+
+        $this->ydhl_parity_product_model = new ParityProductModel(); //XX数据源
+        $this->btj_sign_model = new SignModel(); //btj数据源
+
+        $this->appKey = '48985457';
+        $this->secretKey = '78dft745wer5678gh78989qwe79897';
+        $this->serverUrl = 'http://erp18.jetm3.com/erpApi/api.php';
+        $this->sessionKey = '17f8989er4899qwr89789456wt489789';
+    }
+
+
+    /**
+     * 获取订单信息
+     * @throws Exception
+     */
+    public function getOrderRes() {
+        $request = $this->request_param;
+        $order_no = !empty($request['order_no']) ? $request['order_no'] : 0;
+        //查询订单信息
+        $order_where = [
+            ['s.ordersn', '=', $order_no],
+        ];
+        $order_res = Db::connect('db_mini_mall')->table('ims_ewei_shop_order')->alias('s')->leftJoin('ims_yd_supplier b', 's.openid = b.openid')->field('s.openid,s.id,s.ordersn,s.createtime,b.name,b.nickname,s.price,s.address,s.delivery_type,s.remark,s.status,s.order_type,s.wxapp_prepay_id,s.supplier_id,s.coupon_id,s.coupon_money,delivery_status')->where($order_where)->order('id desc')->find();
+        $data['order'] = array();
+        $data['goods_num'] = 0;
+        $data['order_goods'] = array();
+        if (!empty($order_res)) {
+            if ($order_res['status'] == -1 || $order_res['status'] == 3 || $order_res['status'] == 1) {
+                $data['supplier_id'] = $order_res['supplier_id'];//店铺ID
+                sdk_return($data, '6', '二维码已失效');
+            }
+            unset($new_order);
+            $new_order['id'] = $order_res['id'];//订单ID
+            $new_order['openid'] = $order_res['openid'];//订单ID
+            $new_order['ordersn'] = $order_res['ordersn'];//第三方订单号
+            $new_order['createtime'] = !empty($order_res['createtime']) ? date('Y/m/d H:i:s', $order_res['createtime']) : '';//订单时间
+            $new_order['name'] = $order_res['name'];//店铺名称
+            $new_order['nickname'] = $order_res['nickname'];//店主昵称
+            $new_order['price'] = $order_res['price'];//订单价格
+            $new_order['supplier_id'] = $order_res['supplier_id'];//店铺ID
+            $new_order['remark'] = $order_res['remark'];//订单备注
+
+            if ($order_res['delivery_type'] == 1) {
+                $new_order['delivery_type'] = '配送';
+                try {
+                    $address = unserialize($order_res['address']);
+                } catch (Exception $exceptione) {
+                    $address = '';
+                }
+                if (!empty($address)) {
+                    $new_order['realname'] = $address['realname'];//接收人真实姓名
+                    $new_order['phone'] = $address['mobile'];//接收人真实联系电话
+                    $new_order['address'] = $address['address'];//接收人配送地址
+                } else {
+                    $new_order['realname'] = '';//接收人真实姓名
+                    $new_order['phone'] = '';//接收人真实联系电话
+                    $new_order['address'] = '';//接收人配送地址
+                }
+            } else {
+                $new_order['delivery_type'] = '自提';
+                $new_order['realname'] = '';//接收人真实姓名
+                $new_order['phone'] = '';//接收人真实联系电话
+                $new_order['address'] = '';//接收人配送地址
+            }
+            $new_order['remark'] = $order_res['remark'];//备注
+
+            //查询状态
+            if ($order_res['status'] == 3) {
+//                $status = '<span style="color: green;">已完成</span>';
+                $status = '已完成';
+            } elseif ($order_res['status'] == 1) {
+                $status = '已支付';
+            } elseif ($order_res['status'] == 0) {
+//                $status = '<span style="color: red;">待支付</span>';
+                $status = '待支付';
+            } elseif ($order_res['status'] == 2) {
+//                $status = '<span style="color: red;">已取消</span>';
+//                $status = '已确认，待支付';
+                $status = '待支付';
+            } else {
+                $status = '已取消';
+            }
+            //查询订单类型
+            if ($order_res['order_type'] == 1) {
+                $order_res['order_type'] = '在线订单';
+            } else {
+                $order_res['order_type'] = '货到付款';
+            }
+            $new_order['order_type'] = $order_res['order_type'];
+            $new_order['status'] = $status;
+            $new_order['type'] = $order_res['status'];
+            //订单总额
+            $new_order['coupon_money'] = '-'.$order_res['coupon_money'];
+            $new_order['coupon_id'] = $order_res['coupon_id'];
+            $new_order['order_all_price'] = $order_res['price'] + $order_res['coupon_money'];
+            $new_order['delivery_status'] = $order_res['delivery_status'];
+            $data['order'] = $new_order;
+
+            //查询订单商品信息
+            $order_goods_where = [
+                ['a.orderid', '=', $order_res['id']],
+            ];
+            $order_goods_list = Db::connect('db_mini_mall')->table('ims_ewei_shop_order_goods')->alias('a')->leftJoin('ims_ewei_shop_goods b', 'a.goodsid = b.id')->field('a.id,a.goodsid,a.price,a.total,a.realprice,b.title,b.thumb,b.is_activity')->where($order_goods_where)->order('a.id desc')->select();
+            $order_goods = array();
+            $goods_num = 0;
+            $species_num = 0;
+            foreach ($order_goods_list as $key => $value) {
+
+                $erp_total = $this->erpStorage($value['is_activity'] > 0 ? $value['is_activity'] : $value['goodsid']);
+                if(isset($erp_total[$value['goodsid']])){
+                    $value['erp_total'] = $erp_total[$value['goodsid']]['qty'] - $erp_total[$value['goodsid']]['assign_qty'] - $erp_total[$value['goodsid']]['unassign_qty'];
+                }else{
+                    $value['erp_total'] = 0;
+                }
+
+                $value['thumb'] = imgSrc($value['thumb']);
+                $value['status'] = $order_res['status'];
+                $goods_num = $goods_num + $value['total'];
+                if ($value['total'] > 0) {
+                    $species_num = $species_num + 1;
+                }
+                $order_goods[] = $value;
+            }
+            $data['wxapp_prepay_id'] = !empty($order_res['wxapp_prepay_id']) ? 1 : 0;//1表示锁定订单，不可以修改，0：表示可以修改订单
+            $data['goods_num'] = $goods_num;
+            $data['species_num'] = $species_num;
+            $data['order_goods'] = $order_goods;
+            $data['qrCode_url'] = 'http://ydxqtptest.yundian168.com';//二维码 链接
+        }
+        sdk_return($data, '1', '获取成功');
+    }
+
+    /**
+     * 修改订单信息
+     * @throws Exception
+     */
+    public function editOrder() {
+        $request = $this->request_param;
+        $user_id = !empty($request['user_id']) ? $request['user_id'] : 0;//操作者id
+        $order_id = !empty($request['order_id']) ? $request['order_id'] : 0;//订单ID
+        $order_goods_no = !empty($request['order_goods_no']) ? $request['order_goods_no'] : 0;//订单商品表的ID
+        $total = !empty($request['total']) ? $request['total'] : 0;//商品数量
+        $type = !empty($request['type']) ? $request['type'] : 0;//划单原因
+        $desc = !empty($request['desc']) ? $request['desc'] : '';//划单其他说明
+        //查询订单状态
+        $order_where = [
+            ['id', '=', $order_id],
+        ];
+        $order_data = Db::connect('db_mini_mall')->table('ims_ewei_shop_order')->where($order_where)->field('price,status,ordersn,supplier_id,openid,goods_count')->find();
+        if (($order_data['status'] != -1) && ($order_data['status'] != 1) && ($order_data['status'] != 3)) {
+            //查询member_log表中的状态
+            $member_log_where = [
+                ['logno', '=', $order_data['ordersn']],
+            ];
+            $member_log_data = Db::connect('db_mini_mall')->table('ims_ewei_shop_member_log')->where($member_log_where)->field('id,money,status')->find();
+            if (($member_log_data['status'] == 0)) {
+                //重新计算商品价格，修改商品总价
+                $order_goods_where = [
+                    ['id', '=', $order_goods_no],
+                ];
+                $order_goods_res = Db::connect('db_mini_mall')->table('ims_ewei_shop_order_goods')->field('price,realprice,goodsid,total')->where($order_goods_where)->find();
+
+                if($total == $order_goods_res['total']){
+                    $data['goods_price'] = $order_goods_res['price'];
+                    $data['order_price'] = $order_data['price'];
+                    sdk_return($data, '1', '数量未修改');
+                }
+
+                //修改商品库存
+                $edit_total_num = $total - $order_goods_res['total'];
+                if($edit_total_num < 0){
+                    $edit_total_num = abs($edit_total_num);
+                    Db::connect('db_mini_mall')->execute("UPDATE ims_ewei_shop_goods set total = total + {$edit_total_num},erp_total = erp_total + {$edit_total_num} where id = {$order_goods_res['goodsid']}");
+                }else{
+                    Db::connect('db_mini_mall')->execute("UPDATE ims_ewei_shop_goods set total = total - {$edit_total_num},erp_total = erp_total - {$edit_total_num} where id = {$order_goods_res['goodsid']}");
+                }
+
+                $order_goods_price = $order_goods_res['realprice'] * $total;
+                $param['price'] = $order_goods_price;
+                $param['total'] = $total;
+                $order_goods_model = new ShopOrderGoods();
+                $order_goods_model->updateInfo($order_goods_no, $param);
+                //重新计算订单价格，并修改
+                $order_price = $order_data['price'] - $order_goods_res['price'] + $order_goods_price;
+                $order_param['price'] = $order_price;
+                $order_param['goodsprice'] = $order_price;
+                $order_model = new ShopOrder();
+                $order_model->updateInfo($order_id, $order_param);
+                //修改member_log表中的价格
+                $member_log_param['money'] = $order_price;
+                Db::connect('db_mini_mall')->table('ims_ewei_shop_member_log')->where(['id' => $member_log_data['id']])->update($member_log_param);
+
+                //查询修改完之后节省了多少钱
+                $order_goods_arr = Db::connect('db_mini_mall')->table('ims_ewei_shop_order_goods')->alias('a')->leftJoin('ims_ewei_shop_goods b','a.goodsid = b.id')->where('a.orderid = '.$order_id)->field('a.price,a.total,b.skuid')->select();
+                $save_money = 0;
+                $goods_sum = 0;
+                foreach ($order_goods_arr as $key => $value){
+                    $one_max_price = 0;
+                    if(!empty($value['skuid'])){
+                        //根据skuid查询最高报价
+                        $max_price_arr = Db::connect('db_mini_mall')->table('ims_bb_city_sku')->where('sku_id = '.$value['skuid'])->field('max_price')->find();
+                        $one_max_price = !empty($max_price_arr['max_price']) ? $max_price_arr['max_price'] : 0;
+                    }
+                    $max_price_all = $one_max_price * $value['total'];
+                    if($max_price_all > $value['price']){
+                        $save_money = $max_price_all - $value['price'] + $save_money;
+                    }
+                }
+                //更新当前订单
+                unset($update);
+                $update['money_save'] = $save_money;
+                if($total == 0){
+                    $update['goods_count'] = $order_data['goods_count'] - 1;
+                }
+                Db::connect('db_mini_mall')->table('ims_ewei_shop_order')->where('id = '.$order_id)->update($update);
+
+                //增加商品修改记录
+                unset($param);
+                $param = [
+                    'sup_id' => $order_data['supplier_id'],
+                    'openid' => $order_data['openid'],
+                    'ordersn' => $order_data['ordersn'],
+                    'goods_id' => $order_goods_res['goodsid'],
+                    'count_old' => $order_goods_res['total'],
+                    'count_new' => $total,
+//                    'createuser' => $order_data['openid'],
+                    'createtime' => time(),
+                    'type' => $type,
+                    'desc' => $desc,
+                    'user_id' => $user_id
+                ];
+                Db::connect('db_mini_mall')->table('ims_member_order_change_log')->insert($param);
+
+                $data['goods_price'] = $order_goods_price;
+                $data['order_price'] = $order_price;
+                $this->deliveryAction($user_id,3,$order_id,$order_goods_res['goodsid'],$type,$desc);
+                sdk_return($data, '1', '修改成功');
+            }
+        }
+        sdk_return($data, '6', '当前订单不支持修改');
+    }
+
+    /**
+     * 之前的获取打印数据接口
+     */
+    public function getPrintOrder() {
+        $request = $this->request_param;
+        $order_no = !empty($request['order_no']) ? $request['order_no'] : 0;
+        //查询订单信息
+        $order_where = [
+            ['s.ordersn', '=', $order_no],
+        ];
+        $order_res = Db::connect('db_mini_mall')->table('ims_ewei_shop_order')->alias('s')->leftJoin('ims_yd_supplier b', 's.openid = b.openid')->field('s.openid,s.id,s.ordersn,s.createtime,b.name,b.nickname,s.price,s.address,s.delivery_type,s.remark,s.status,s.order_type,s.wxapp_prepay_id,s.supplier_id')->where($order_where)->order('id desc')->find();
+        $data['order'] = array();
+        $data['goods_num'] = 0;
+        $data['order_goods'] = array();
+        if (!empty($order_res)) {
+//            if ($order_res['status'] == -1 || $order_res['status'] == 3 || $order_res['status'] == 1) {
+//                $data['supplier_id'] = $order_res['supplier_id'];//店铺ID
+//                sdk_return($data, '6', '二维码已失效');
+//            }
+            unset($new_order);
+            $new_order['id'] = $order_res['id'];//订单ID
+            $new_order['openid'] = $order_res['openid'];//订单ID
+            $new_order['ordersn'] = $order_res['ordersn'];//第三方订单号
+            $new_order['createtime'] = !empty($order_res['createtime']) ? date('Y/m/d H:i:s', $order_res['createtime']) : '';//订单时间
+            $new_order['name'] = $order_res['name'];//店铺名称
+            $new_order['nickname'] = $order_res['nickname'];//店主昵称
+            $new_order['price'] = $order_res['price'];//订单价格
+            $new_order['supplier_id'] = $order_res['supplier_id'];//店铺ID
+
+            if ($order_res['delivery_type'] == 1) {
+                $new_order['delivery_type'] = '配送';
+                try {
+                    $address = unserialize($order_res['address']);
+                } catch (Exception $exceptione) {
+                    $address = '';
+                }
+                if (!empty($address)) {
+                    $new_order['realname'] = $address['realname'];//接收人真实姓名
+                    $new_order['phone'] = $address['mobile'];//接收人真实联系电话
+                    $new_order['address'] = $address['address'];//接收人配送地址
+                } else {
+                    $new_order['realname'] = '';//接收人真实姓名
+                    $new_order['phone'] = '';//接收人真实联系电话
+                    $new_order['address'] = '';//接收人配送地址
+                }
+            } else {
+                $new_order['delivery_type'] = '自提';
+                $new_order['realname'] = '';//接收人真实姓名
+                $new_order['phone'] = '';//接收人真实联系电话
+                $new_order['address'] = '';//接收人配送地址
+            }
+            $new_order['remark'] = $order_res['remark'];//备注
+
+            //查询状态
+            if ($order_res['status'] == 3) {
+//                $status = '<span style="color: green;">已完成</span>';
+                $status = '已完成';
+            } elseif ($order_res['status'] == 1) {
+                $status = '已支付';
+            } elseif ($order_res['status'] == 0) {
+//                $status = '<span style="color: red;">待支付</span>';
+                $status = '待支付';
+            } elseif ($order_res['status'] == 2) {
+//                $status = '<span style="color: red;">已取消</span>';
+//                $status = '已确认，待支付';
+                $status = '待支付';
+            } else {
+                $status = '已取消';
+            }
+            //查询订单类型
+            if ($order_res['order_type'] == 1) {
+                $order_res['order_type'] = '在线订单';
+            } else {
+                $order_res['order_type'] = '货到付款';
+            }
+            $new_order['order_type'] = $order_res['order_type'];
+            $new_order['status'] = $status;
+            $new_order['type'] = $order_res['status'];
+            $data['order'] = $new_order;
+
+            //查询订单商品信息
+            $order_goods_where = [
+                ['a.orderid', '=', $order_res['id']],
+            ];
+            $order_goods_list = Db::connect('db_mini_mall')->table('ims_ewei_shop_order_goods')->alias('a')->leftJoin('ims_ewei_shop_goods b', 'a.goodsid = b.id')->field('a.id,a.price,a.total,a.realprice,b.title,b.thumb')->where($order_goods_where)->order('a.id desc')->select();
+            $order_goods = array();
+            $goods_num = 0;
+            $species_num = 0;
+            $all_price = 0;
+            foreach ($order_goods_list as $key => $value) {
+                $value['thumb'] = imgSrc($value['thumb']);
+                $value['status'] = $order_res['status'];
+                $goods_num = $goods_num + $value['total'];
+                if ($value['total'] > 0) {
+                    $species_num = $species_num + 1;
+                }
+                $all_price = $all_price + $value['price'];
+                $order_goods[] = $value;
+            }
+
+            //查询业务员
+            $user_name = null;
+            $db_mini_mall = new \app\api\model\ydxq\Supplier();
+            $user_unionid = $db_mini_mall->querySql("SELECT unionid from ims_ewei_shop_member where openid = '{$order_res['openid']}'");
+            if (!empty($user_unionid[0]['unionid'])) {
+                $db_btj = new Sign();
+                $user_admin_id = $db_btj->querySql("SELECT service_id from potential_customer where union_id = '{$user_unionid[0]['unionid']}'");
+                if (!empty($user_admin_id[0]['service_id'])) {
+                    $user_name = $db_btj->querySql("SELECT `name`,user_name from btj_admin_user where user_id = {$user_admin_id[0]['service_id']}");
+                }
+            }
+
+            $data['wxapp_prepay_id'] = !empty($order_res['wxapp_prepay_id']) ? 1 : 0;//1表示锁定订单，不可以修改，0：表示可以修改订单
+            $data['goods_num'] = $goods_num;//商品数量
+            $data['species_num'] = $species_num;//商品种类数量
+            $data['all_price'] = $all_price . '';//商品总价
+            $data['yewuyuan'] = !empty($user_name) ? $user_name[0]['name'] : '';//业务员
+            $data['yewuyuan_phone'] = !empty($user_name) ? $user_name[0]['user_name'] : '';//业务员手机号
+            $data['order_goods'] = $order_goods;
+
+            $data['qrCode_siji'] = 'https://btj.yundian168.com/biz/bd1/index.html#/driver?orderno=' . $order_res['ordersn'];//司机二维码 链接
+            $data['qrCode_dianzhu'] = 'http://ydxqtptest.yundian168.com?orderId=' . $order_res['id'] . '&order_no=' . $order_res['ordersn'];//店主二维码 链接
+        }
+        sdk_return($data, '1', '获取成功');
+    }
+
+    /**
+     * 获取openid点位所在区码
+     * @param string $user_openid
+     * @return int|string
+     * @throws Exception
+     */
+    private function getAreaCode($user_openid = ''){
+        if(empty($user_openid)){
+            return 0;
+        }
+        $area_id = 0;
+        //查询当前购买c端店铺的点位地址
+        $user_area_id = Db::connect('db_btj_new')->table('potential_customer')->field('area_id,address')->where('is_validity = 1 and xcx_openid = "'.$user_openid.'"')->find();
+        if(empty($user_area_id['area_id'])){
+            //没有area_id,调用高德接口获取
+            if(!empty($user_area_id['address'])){
+                $url = "https://restapi.amap.com/v3/geocode/geo?output=JSON&key=ea30dd0bc2c1f965f535433fd54d292d&address=".preg_replace('# #','',$user_area_id['address']);
+// 执行请求
+                $ch = curl_init();
+                curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+                curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+                curl_setopt($ch, CURLOPT_URL, $url);
+                $data = curl_exec($ch);
+                curl_close($ch);
+                $result = json_decode($data, true);
+                $location = $result['geocodes'][0]['location'];
+                $loca = explode(',',$location);
+//                var_dump($location.$result['geocodes'][0]['province'].",".$result['geocodes'][0]['city'].",".$result['geocodes'][0]['district'].":".$i++);
+                if($location) {
+                    //省码
+                    $province_arr = Db::connect('db_wehub')->table('regionh')->field('id')->where('parent_id = 0 and name = "'.$result['geocodes'][0]['province'].'"')->find();
+                    $province = $province_arr['id'] > 0 ? $province_arr['id'] : '0';
+                    //市码
+                    $city_arr = Db::connect('db_wehub')->table('regionh')->field('id')->where('parent_id = '.$province.' and name = "'.mb_substr($result['geocodes'][0]['city'],0,mb_strlen($result['geocodes'][0]['city'])-1).'"')->find();
+                    $city = $city_arr['id'] > 0 ? $city_arr['id'] : '0';
+                    //区码
+                    $area_arr = Db::connect('db_wehub')->table('regionh')->field('id')->where('parent_id = '.$city.' and name = "'.$result['geocodes'][0]['district'].'"')->find();
+                    $area = $area_arr['id'] > 0 ? $area_arr['id'] : '0';
+                    $area_id = $area;
+                }
+            }
+        }else{
+            $area_id = $user_area_id['area_id'];
+        }
+        return $area_id;
+    }
+
+    /**
+     * 2019年10月19日11:34:25：获取打印数据
+     */
+    public function getPrintOrder_v2(){
+        $order_id_res = $this->request->param('order_id', '', 'trim');
+        if(empty($order_id_res)){
+            sdk_return('',6,'缺少参数');
+        }
+//        $order_id = json_decode($order_id_res,true);
+        //查询店铺名称
+//        $s_where = [
+//            ['b.id', '=', $order_id],
+//        ];
+//        $shop_name_arr = Db::connect('db_mini_mall')->table("ims_yd_supplier")->alias('a')->leftJoin('ims_ewei_shop_order b', 'a.id = b.supplier_id')->field('a.name')->where($s_where)->limit(1)->select();
+//        $shop_name = !empty($shop_name_arr[0]['name']) ? $shop_name_arr[0]['name'] : '';
+        $order_id_arr = explode(',',$order_id_res);
+        $return_data = array();
+        if(!empty(count($order_id_arr))){
+            foreach ($order_id_arr as $one){
+                $order_id = $one;
+                //查询订单信息
+                $where = [
+                    ['s.id', '=', $order_id],
+                ];
+                $shop_order_data = Db::connect('db_mini_mall')->table('ims_ewei_shop_order')->alias('s')->leftJoin('ims_yd_supplier b', 's.openid = b.openid')->field('s.supplier_id,s.openid,s.id,s.ordersn,s.createtime,b.name,b.nickname,s.price,s.address,s.delivery_type,s.remark,b.address as shop_address,s.coupon_id,s.coupon_money')->where($where)->select();
+                $user_name = array();
+                $service_id = 0;//业务员ID
+                $shop_dianwei_address = '';//点位地址
+                $shop_dianwei_name = '';//点位名称
+                $user_name = '';//业务员名称
+                if (!empty($shop_order_data)) {
+                    $db_mini_mall = new Supplier();
+                    $db_btj = new Sign();
+                    //查询参考点位
+//                    $shop_openid = $db_mini_mall->querySql("SELECT openid,unionid,un_id from ims_yd_supplier where id = '{$shop_order_data[0]['supplier_id']}'");
+                    $shop_openid[0]['openid'] = !empty($shop_order_data[0]['openid']) ? $shop_order_data[0]['openid'] : '';
+                    if(!empty(count($shop_openid))){
+                        $shop_openid_one = !empty($shop_openid[0]['openid']) ? $shop_openid[0]['openid'] : '';
+                        if(!empty($shop_openid_one)){
+                            //查询点位
+                            $shop_openid_one_arr = $db_btj->querySql("SELECT service_id,area_info,address,user_name from potential_customer where xcx_openid = '{$shop_openid_one}'");
+                            $shop_dianwei_address = !empty($shop_openid_one_arr[0]['address']) ? $shop_openid_one_arr[0]['address'] : '';
+                            $shop_dianwei_name = !empty($shop_openid_one_arr[0]['user_name']) ? $shop_openid_one_arr[0]['user_name'] : '';
+                            $service_id = !empty($shop_openid_one_arr[0]['service_id']) ? $shop_openid_one_arr[0]['service_id'] : 0;
+                        }
+                    }
+                    //查询业务员
+                    if (!empty($service_id)) {
+                        $user_name_arr = $db_btj->querySql("SELECT `name`,user_name from btj_admin_user where user_id = {$service_id}");
+                        $user_name = !empty($user_name_arr[0]) ? $user_name_arr[0]['name'] . '(' . $user_name_arr[0]['user_name'] . ')' : '';
+                    }
+                    try {
+                        $address = unserialize($shop_order_data[0]['address']);
+                    } catch (Exception $exceptione) {
+                        $address = '';
+                    }
+                    if (!empty($address)) {
+                        $new_order['realname'] = $address['realname'];//接收人真实姓名
+                        $new_order['phone'] = $address['mobile'];//接收人真实联系电话
+                        $new_order['address'] = $address['address'].$address['street'];//接收人配送地址
+                    } else {
+                        $new_order['realname'] = '';//接收人真实姓名
+                        $new_order['phone'] = '';//接收人真实联系电话
+                        $new_order['address'] = '';//接收人配送地址
+                    }
+                    $order_time = !empty($shop_order_data[0]['createtime']) ? date('Y/m/d H:i', $shop_order_data[0]['createtime']) : '';
+                    $order_realname = !empty($new_order['realname']) ? $new_order['realname'] : '';
+                    $order_ordersn = !empty($shop_order_data[0]['ordersn']) ? $shop_order_data[0]['ordersn'] : '';
+                    $order_phone = !empty($new_order['phone']) ? $new_order['phone'] : '';
+                    $order_address = !empty($new_order['address']) ? $new_order['address'] : '';
+                }
+                //查询订单商品
+                $where = [
+                    ['a.orderid', '=', $order_id],
+                ];
+                $order_goods_list = Db::connect('db_mini_mall')->table('ims_ewei_shop_order_goods')->alias('a')->leftJoin('ims_ewei_shop_goods b', 'a.goodsid = b.id')->field('a.id,a.price,a.total,a.realprice,b.title,b.thumb,b.goods_code,b.goods_area,b.is_activity,b.s_sale')->where($where)->order('b.title desc')->select();
+//        echo Db::connect('db_mini_mall')->getLastSql();exit;
+                $count_total = 0;
+                $count_money = 0;
+                $goods_data = array();
+
+                //查询关联金币订单商品
+                $gold_goods_arr = Db::connect('db_mini_mall')->table('ims_ewei_shop_exchange_order')->alias('a')->leftJoin('ims_ewei_shop_exchange_goods b','a.goodsid = b.id')->field('a.id,a.total,b.title,b.img')->where('a.shop_order_id = '.$order_id.' and is_dist_order = 1')->select();
+                if(!empty(count($gold_goods_arr))){
+                    foreach ($gold_goods_arr as $key => $value){
+                        $goods_data[] = [
+//                    $value['id'],
+                            $key+1,
+                            'title'=>$value['title'],
+                            'realprice'=>'0.00',
+                            'total'=>$value['total'],
+                            'price'=>'兑换订单商品',
+                        ];
+                        $count_total = $count_total + $value['total'];
+                    }
+                }
+                $user_areaid = $this->getAreaCode($shop_order_data[0]['openid']);
+                if (!empty(count($order_goods_list))) {
+                    foreach ($order_goods_list as $key => $value) {
+                        $goods_area_msg = '';
+                        if(!empty($value['goods_area'])){
+                            $area_arr = Db::connect('db_wehub')->table('regionh')->field('name')->where('id = '.$user_areaid)->find();
+                            $goods_area_msg = '（'.$area_arr['name'].'）';
+                            if($user_areaid > 0){
+                                if(strpos($value['goods_area'].'',$user_areaid.'') === false){
+                                    $goods_area_id_arr = explode(',',$value['goods_area']);
+                                    $goods_area_name_arr = Db::connect('db_wehub')->table('regionh')->field('name')->where([['id','in',$goods_area_id_arr]])->select();
+                                    if(!empty($goods_area_name_arr)){
+                                        foreach ($goods_area_name_arr as $one_a_name){
+                                            $goods_area_name = '，'.$one_a_name['name'];
+                                        }
+                                        $goods_area_name_str = trim($goods_area_name,'，');
+                                    }
+                                    if(!empty($goods_area_name_str)){
+                                        $goods_area_msg = '【异常商品，仅限（'.$goods_area_name_str.'）购买】';
+                                    }
+                                }
+                            }else{
+                                $goods_area_id_arr = explode(',',$value['goods_area']);
+                                $goods_area_name_arr = Db::connect('db_wehub')->table('regionh')->field('name')->where([['id','in',$goods_area_id_arr]])->select();
+                                if(!empty($goods_area_name_arr)){
+                                    foreach ($goods_area_name_arr as $one_a_name){
+                                        $goods_area_name = '，'.$one_a_name['name'];
+                                    }
+                                    $goods_area_name_str = trim($goods_area_name,'，');
+                                }
+                                if(!empty($goods_area_name_str)){
+                                    $goods_area_msg = '【异常商品，仅限（'.$goods_area_name_str.'）购买】';
+                                }
+                            }
+                        }
+                        //活动品处理
+                        if($value['is_activity'] > 0){
+                            //查询商品名称和s_sale
+                            $f_goods_data = Db::connect('db_mini_mall')->table('ims_ewei_shop_goods')->where('id = '.$value['is_activity'])->field('title')->find();
+                            $value['title'] = !empty($f_goods_data['title']) ? $f_goods_data['title'].'（活动商品）' : '';
+                            if($value['realprice'] <= 0.01){
+                                $value['realprice'] = 0;
+                                $value['total'] = $value['s_sale'];
+                            }
+                        }
+                        $goods_data[] = [
+//                    $value['id'],
+                            $key+1,
+                            'title'=>$value['title'].$goods_area_msg,
+                            'realprice'=>$value['realprice'],
+                            'total'=>$value['total'],
+                            'price'=>$value['price'],
+                        ];
+                        $count_total = $count_total + $value['total'];
+                        $count_money = $count_money + $value['price'];
+                    }
+                }
+
+                require_once __DIR__ . '/../../../vendor/phpqrcode/phpqrcode.php';
+
+                //生成司机联二维码
+//                $qr_url_siji = 'https://btj.yundian168.com/biz/bd1/index.html#/driver?orderno=' . $shop_order_data[0]['ordersn'];
+                $qr_url_siji = 'https://btj.yundian168.com/biz/ceydxq/index.html#/driver?orderno=' . $shop_order_data[0]['ordersn'];
+                $path = '/upload/images/' . $order_id . '_' . $shop_order_data[0]['ordersn'] . '1.png';
+                $filename = './upload/images/' . $order_id . '_' . $shop_order_data[0]['ordersn'] . '1.png';
+                \QRcode::png($qr_url_siji, $filename);
+                $data['sijilian'] = $this->request->domain().$path;//司机联二维码
+                unset($path,$filename,$qr_url_siji);
+
+                //生成店主联二维码
+                $qr_url = 'http://ydxqtptest.yundian168.com?orderId=' . $order_id.'&order_no='.$shop_order_data[0]['ordersn'];
+                $path = '/upload/images/' . $order_id . '_' . $shop_order_data[0]['ordersn'] . '2.png';
+                $filename = './upload/images/' . $order_id . '_' . $shop_order_data[0]['ordersn'] . '2.png';
+                \QRcode::png($qr_url, $filename);
+                $data['dianzhulian'] = $this->request->domain().$path;//店主联二维码
+                unset($path,$filename,$qr_url);
+
+                //获取当前订单的顺序
+                $data['sort'] = 0;
+                if(!empty($order_ordersn)){
+                    $driver_order = Db::connect('db_mini_mall')->table('ims_ewei_drivers_orders')->where([['ordersn', '=', $order_ordersn]])->order(['id'=>'desc'])->find();
+                    if($driver_order){
+                        $data['sort'] = $driver_order['sort'];
+                    }
+                }
+
+                $data['order_id'] = !empty($order_id) ? $order_id : '';//订单ID
+                $data['order_time'] = !empty($order_time) ? $order_time : '';//订单时间
+                $data['realname'] = !empty($order_realname) ? $order_realname : '';//真是姓名
+                $data['ordersn'] = !empty($order_ordersn) ? $order_ordersn : '';//订单号
+                $data['phone'] = !empty($order_phone) ? $order_phone : '';//手机号
+                $data['address'] = !empty($order_address) ? $order_address : '';//地址
+                $data['goods_num'] = $count_total;//总计数量
+//                $data['goods_price'] = $count_money;//总计价格
+                $data['goods_price'] = $shop_order_data[0]['price'];//总计价格
+                $data['goods_data'] = $goods_data;//商品数据
+                $data['user_name'] = $user_name;//业务员
+                $data['dianwei_name'] = $shop_dianwei_name;//点位名称
+                $data['dianwei_address'] = $shop_dianwei_address;//点位地址
+                $data['remark'] = $shop_order_data[0]['remark'];//订单备注
+                //订单总额
+                $data['coupon_money'] = '-'.$shop_order_data[0]['coupon_money'];
+                $data['order_all_price'] = $shop_order_data[0]['price'] + $shop_order_data[0]['coupon_money'];
+                $return_data[] = $data;
+                unset($data);
+            }
+        }
+        
+        //排序
+        $base_coupon = new BbBaseCoupon();
+        $return_data = $base_coupon->arraySort($return_data, 'sort', SORT_ASC);
+
+        if(!empty($return_data)){
+            sdk_return($return_data,0,'success');
+        }else{
+            sdk_return('',6,'获取失败');
+        }
+    }
+
+
+    //获取ERP库存
+    private function erpStorage($goods_ids){
+        $client = new \TopClient();
+        $client->appKey     =  $this->appKey;
+        $client->secretKey  =  $this->secretKey;
+        $client->gatewayUrl  = $this->serverUrl;
+        $request = new \GoodsTotalQueryRequest();
+
+        $request->setPrdNos($goods_ids);
+        $request->setSkuNo('1');
+        $request->setPageIndex(1);
+        $request->setPageSize(100);
+        $result = $client->execute($request,$this->sessionKey);
+        $result_data = array();
+        if(is_array($result) && isset($result['result']['list']) && is_array($result['result']['list'])){
+            foreach($result['result']['list'] as $list){
+                $result_data[$list['prd_no']] = array('qty' => $list['qty'], 'assign_qty' => $list['assign_qty'], 'unassign_qty' => $list['unassign_qty'], 'sc_qty' => 0);
+            }
+        }
+        return $result_data;
+    }
+
+    /**
+     * 供应链动作埋点
+     * $huangke
+     * uid 用户id
+     * action 动作id 1分拣2装车3划单4签到5送达6拒收7排线8发车9回库
+     * lineid 排线车次id
+     * orderid 订单id
+     * goodsid 商品id
+     * type 划单选项 OR 收款方式
+     * desc 动作说明
+     */
+    private function deliveryAction($uid,$action,$orderid = 0,$goodsid = 0,$type = 0,$desc = '')
+    {
+        $data = [];
+        $data['uid'] = $uid;//用户id
+        $data['action'] = $action;//动作id 1分拣2装车3划单4签到5送达6拒收7排线8发车9回库
+        $lineid = Db::connect('db_mini_mall')->table('ims_ewei_drivers_order')->where('order_id',$orderid)->value('line_id');
+        $data['lineid'] = $lineid;//排线id
+        $data['orderid'] = $orderid;//订单id
+        $data['goodsid'] = $goodsid;//商品id
+        //组合动作说明
+        //type 划单选项 1未采购2配货错误3其他4找不到5已采购未到库6客户不要
+        if($type == 1){
+            $desc = '未采购';
+        }elseif($type == 2){
+            $desc = '配货错误';
+        }elseif($type == 4){
+            $desc = '找不到';
+        }elseif($type == 5){
+            $desc = '已采购未到库';
+        }elseif($type == 6){
+            $desc = '客户不要';
+        }
+        $data['desc'] = $desc;//动作说明
+        $data['role'] = Db::connect('db_mini_mall')->table('ims_ewei_drivers')->where('id',$uid)->value('role');//用户角色 1司机2分拣员3库管
+        //获取当天操作者最早工作时间
+        $startime = Db::connect('db_mini_mall')->table('ims_delivery_action_log')->where('uid',$uid)->where('createtime','>',strtotime(date('Y-m-d')))->min('createtime');
+        $data['worktime'] = $startime > 0 ? time() - $startime : 0;
+        $data['createtime'] = time();//创建时间
+        Db::connect('db_mini_mall')->table('ims_delivery_action_log')->insert($data);
+    }
+}
+?>

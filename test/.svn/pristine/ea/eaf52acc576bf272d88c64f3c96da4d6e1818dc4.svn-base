@@ -1,0 +1,573 @@
+<?php
+
+/**
+ * Author: seaboyer@163.com
+ * Date: 2019-08-08
+ */
+
+namespace app\api\controller;
+
+use app\api\model\ydxq\Supplier as SupplierModel;
+
+use think\Db;
+use think\Exception;
+
+class Category extends BaseController {
+    protected $m_SupplierModel;
+
+    public function __construct() {
+        parent::__construct();
+        $this->m_SupplierModel = new SupplierModel();
+    }
+
+    /**
+     * 查询店铺首页分类（2019年10月8日15:58:32停用）
+     * @throws Exception
+     */
+//    public function indexCategory(){
+//        $param = $this->request_param;
+//        $sup_id = !empty($param['sup_id']) ? $param['sup_id'] : sdk_return('', 6, '缺少参数');
+//        //查询店铺一级分类
+//        $category = Db::connect('db_mini_mall')->table('ims_bb_supplier_cate')->alias('a')->leftJoin('ims_bb_cate_bb b','a.cate_bb2 = b.id')->field('a.*,b.img')->where([['a.sup_id','=',$sup_id],['a.is_home','=',1],['status','=',1]])->order('a.id','asc')->select();
+//        $category_arr = array();
+//        if(!empty(count($category))){
+//            foreach ($category as $key => $value){
+//                $one_category_id = $value['cate_bb2'];
+//                $one_category = array();
+//                //查询二级分类
+//                $two_category = Db::connect('db_mini_mall')->table('ims_bb_supplier_cate')->alias('a')->leftJoin('ims_bb_cate_bb b','a.cate_bb2 = b.id')->field('a.*,b.img')->where([['a.sup_id','=',$sup_id],['a.cate_bb1','=',$one_category_id]])->select();
+//                $t_category = array();
+//                $t_category_a = array();
+//                if(!empty($two_category)){
+//                    foreach ($two_category as $two_k => $two_v){
+//                        $t_category['id'] = $two_v['cate_bb2'];
+//                        $t_category['category_name'] = $two_v['category_name'];
+//                        $t_category['skuid_count'] = $two_v['skuid_count'];
+//                        //读取第一张图片
+//                        $t_img = '';
+//                        if(!empty($two_v['img'])){
+//                            $t_img_arr = json_decode($two_v['img'],true);
+//                            $t_img = !empty($t_img_arr[0]) ? $t_img_arr[0] : '';
+//                        }
+//                        $t_category['img'] = $t_img;
+//                        $t_category_a[] = $t_category;
+//                    }
+//                }
+//                $one_category['id'] = $value['cate_bb2'];
+//                $one_category['category_name'] = $value['category_name'];
+//                $one_category['skuid_count'] = $value['skuid_count'];
+//                $one_category['img'] = $value['img'];
+//                $one_category['category'] = $t_category_a;
+//                $category_arr[] = $one_category;
+//            }
+//        }
+//        sdk_return($category_arr, 1, 'success');
+//    }
+
+    /**
+     * 查询一级分类
+     * 查询首页一级分类
+     * @throws Exception
+     */
+    public function oneCategory(){
+        $param = $this->request_param;
+        $sup_id = !empty($param['sup_id']) ? $param['sup_id'] : sdk_return('', 6, '缺少参数');
+        $type = !empty($param['type']) ? $param['type'] : 1;//1：首页，2：分类
+        //根据店铺ID查询一级分类
+        if($type == 1){
+            $one_category = Db::connect('db_mini_mall')->table('ims_bb_supplier_cate')->alias('a')->leftJoin('ims_bb_cate_bb b','a.cate_bb2 = b.id')->field('a.*,b.img')->where([['a.sup_id','=',$sup_id],['a.is_home','=',1],['a.status','=',1],['a.cate_bb1','=',0]])->order(['pxid'=>'desc','id'=>'desc'])->select();
+        }else{
+            $one_category = Db::connect('db_mini_mall')->table('ims_bb_supplier_cate')->alias('a')->leftJoin('ims_bb_cate_bb b','a.cate_bb2 = b.id')->field('a.*,b.img')->where([['a.sup_id','=',$sup_id],['a.status','=',1],['a.cate_bb1','=',0]])->order(['pxid'=>'desc','id'=>'desc'])->select();
+        }
+
+        $data = array();
+        if(!empty(count($one_category))){
+            foreach ($one_category as $one_k => $one_v){
+                $o_img = '';
+                if(!empty($one_v['img'])){
+                    $o_img_arr = json_decode($one_v['img'],true);
+                    $o_img = !empty($o_img_arr[0]) ? $o_img_arr[0] : '';
+                }
+                $one_v['img'] = $o_img;
+                $data[] = $one_v;
+            }
+        }
+        sdk_return($data, 1, 'success');
+    }
+
+    /**
+     * 查询首页固定的二级分类
+     */
+    public function indexTwoCategory(){
+        $param = $this->request_param;
+        $sup_id = !empty($param['sup_id']) ? $param['sup_id'] : sdk_return('', 6, '缺少参数');
+        //根据一级分类ID，和店铺ID，查询商品数量
+        $two_category_arr = Db::connect('db_mini_mall')->table('ims_bb_supplier_cate')->alias('a')->leftJoin('ims_bb_cate_bb b','a.cate_bb2 = b.id')->field('a.*,b.img')->where([['a.sup_id','=',$sup_id],['a.cate_bb1','<>',0],['a.is_home','=',1],['a.status','=',1]])->order('pxid','desc')->select();
+        $data = array();
+        if(!empty(count($two_category_arr))){
+            foreach ($two_category_arr as $two_k => $two_v){
+                $t_img = '';
+                if(!empty($two_v['img'])){
+                    $t_img_arr = json_decode($two_v['img'],true);
+                    $t_img = !empty($t_img_arr[0]) ? $t_img_arr[0] : '';
+                }
+                $two_v['img'] = $t_img;
+                $data[] = $two_v;
+            }
+        }
+        sdk_return($data, 1, 'success');
+    }
+
+    /**
+     * 根据一级分类ID，和店铺ID，查询二级分类
+     * @throws Exception
+     */
+    public function twoCategory(){
+        $param = $this->request_param;
+        $sup_id = !empty($param['sup_id']) ? $param['sup_id'] : sdk_return('', 6, '缺少参数');
+        $one_cate = !empty($param['one_cate']) ? $param['one_cate'] : sdk_return('', 6, '缺少参数');
+        //根据一级分类ID，和店铺ID，查询商品数量
+        $two_category_arr = Db::connect('db_mini_mall')->table('ims_bb_supplier_cate')->alias('a')->leftJoin('ims_bb_cate_bb b','a.cate_bb2 = b.id')->field('a.*,b.img')->where([['a.sup_id','=',$sup_id],['a.cate_bb1','=',$one_cate]])->order('price_count','desc')->select();
+        $data = array();
+        $all_sku_count = 0;
+        if(!empty(count($two_category_arr))){
+            foreach ($two_category_arr as $two_k => $two_v){
+                $t_img = '';
+                if(!empty($two_v['img'])){
+                    $t_img_arr = json_decode($two_v['img'],true);
+                    $t_img = !empty($t_img_arr[0]) ? $t_img_arr[0] : '';
+                }
+                $all_sku_count = $all_sku_count + $two_v['skuid_count'];
+                $two_v['img'] = $t_img;
+                $data[] = $two_v;
+            }
+            $all = [
+                "id" => 0,
+                "sup_id" => 461,
+                "cate_bb1" => 0,
+                "cate_bb2" => 0,
+                "category_name" => "全部",
+                "create_time" => time(),
+                "skuid_count" => $all_sku_count,
+                "is_home" => 0,
+                "status" => 0,
+                "img" => "",
+            ];
+            array_unshift($data,$all);
+        }
+        sdk_return($data, 1, 'success');
+    }
+
+    /**
+     * 根据分类ID和店铺ID查询品牌信息
+     * @throws Exception
+     */
+    public function categoryBrandList(){
+        $param = $this->request_param;
+        $sup_id = !empty($param['sup_id']) ? $param['sup_id'] : sdk_return('', 6, '缺少参数');
+//        $category_id = !empty($param['category_id']) ? $param['category_id'] : sdk_return('', 6, '缺少参数');
+        $category_id1 = !empty($param['category_id1']) ? $param['category_id1'] : 0;
+        $category_id2 = !empty($param['category_id2']) ? $param['category_id2'] : 0;
+        $brand_id = !empty($param['brand_id']) ? $param['brand_id'] : 0;
+        $where = '1 ';
+        if(!empty($category_id1)){
+            if(!empty($category_id2)){
+                $where .= ' and a.sup_id = '.$sup_id.' and a.cate_id = '.$category_id2;
+            }else {
+                //根据一级分类查询二级分类ID
+                $two_c_id = Db::connect('db_mini_mall')->table('ims_bb_supplier_cate')->where([['cate_bb1','=',$category_id1]])->field('cate_bb2')->select();
+                $two_c_id_arr = array();
+                $two_c_id_res = '';
+                if(!empty(count($two_c_id))){
+                    foreach ($two_c_id as $k => $v){
+                        $two_c_id_arr[] = $v['cate_bb2'];
+                        $two_c_id_res .= ','.$v['cate_bb2'];
+                    }
+                }
+                $where .= ' and a.sup_id = '.$sup_id.' and a.cate_id in (SELECT cate_bb2 from ims_bb_supplier_cate WHERE cate_bb1 = '.$category_id1.' and sup_id = '.$sup_id.')';
+            }
+        }else{
+            if(empty($category_id2)){
+                if(empty($brand_id)){
+                    sdk_return('', 6, '缺少参数');
+                }else{
+                    $where .= ' and a.sup_id = '.$sup_id.' and a.brand_id = '.$brand_id;
+                }
+            }else{
+                $where .= ' and a.sup_id = '.$sup_id.' and a.cate_id = '.$category_id2;
+            }
+        }
+        $where .= ' and a.sku_count > 0';
+        //根据分类ID和店铺ID查询品牌信息
+//        $brand_arr = Db::connect('db_mini_mall')->table('ims_bb_supplier_cate_brand')->alias('a')->leftJoin('ims_bb_brand b','a.brand_id = b.id')->where($where)->field('a.*,b.b_name')->order('sku_channel_count','desc')->group('a.brand_id,a.cate_id')->select();
+        $brand_arr = Db::connect('db_mini_mall')->query("SELECT c.*,sum(c.sku_count) as new_count from (SELECT a.*,sum(a.sku_count) as new_sku_count,b.b_name from ims_bb_supplier_cate_brand as a LEFT JOIN ims_bb_brand as b on a.brand_id = b.id WHERE {$where} GROUP BY a.brand_id,a.cate_id) as c GROUP BY c.brand_id order by new_count desc,id desc");
+//        $brand_arr = Db::connect('db_mini_mall')->table('ims_bb_cate_brand')->alias('a')->leftJoin('ims_bb_brand b','a.brand_id = b.id')->where([['cate_id','=',$category_id]])->select();
+        $data = array();
+        $sku_count = 0;
+        if(!empty(count($brand_arr))){
+            foreach ($brand_arr as $key => $value){
+                $value['sku_count'] = '';
+                $brand_arr[$key]['sku_count'] = intval($value['new_count']);
+                $sku_count = $sku_count + $brand_arr[$key]['sku_count'];
+            }
+            $all = [
+                'b_name' => "全部",
+                'brand_id' => 0,
+                'cate_id' => 0,
+                'create_time' => 1570525566,
+                'dist_count' => 0,
+                'id' => 0,
+                'is_home' => 0,
+                'pxid' => 0,
+                'sku_channel_count' => 0,
+                'sku_count' => $sku_count,
+                'new_count' => $sku_count,
+                'status' => 1,
+                'sup_id' => $sup_id,
+                'update_time' => 1570525566,
+            ];
+            if(empty($brand_id)){
+                array_unshift($brand_arr,$all);
+            }
+            $data = $brand_arr;
+        }
+        sdk_return($data, 1, 'success');
+    }
+
+    /**
+     * 查询店铺商品
+     * @throws Exception
+     */
+    public function getGoods(){
+        $param = $this->request_param;
+        $sup_id = !empty($param['sup_id']) ? $param['sup_id'] : sdk_return('', 6, '缺少参数');
+        $page = !empty($param['page']) ? $param['page'] : 1;
+
+        $one_cate_id = !empty($param['one_cate_id']) ? $param['one_cate_id'] : 0;
+        $two_cate_id = !empty($param['two_cate_id']) ? $param['two_cate_id'] : 0;
+        $brand_id = !empty($param['brand_id']) ? $param['brand_id'] : 0;
+        $sort = !empty($param['sort']) ? $param['sort'] : 0;//0：综合排序，1：销量排序，2：价格排序
+
+        //$one_cate_id和$two_cate_id必须有一个不为空
+        if((empty($one_cate_id)) && empty($two_cate_id) && empty($brand_id)){
+            sdk_return('', 6, '缺少参数');
+        }
+
+        $openids = !empty($param['user_openid']) ? $param['user_openid'] : sdk_return('', 6, '缺少参数');//0：综合排序，1：销量排序，2：价格排序
+        $is_sns = strstr($openids,'sns_wa_');
+        if(!$is_sns){
+            $openids =   'sns_wa_'.$openids;
+        }
+        if($sort == 1){
+            $order = [
+                'a.salesreal' => 'desc',
+            ];
+//            $order = 'a.salesreal';
+//            $paiXu = 'desc';
+        }elseif($sort == 2){
+            $order = [
+                'b.supplier_price' => 'asc',
+            ];
+//            $order = 'b.supplier_price';
+//            $paiXu = 'asc';
+        }else{
+            $order = [
+                'c.channel_count' => 'desc',
+                'a.salesreal' => 'desc',
+            ];
+//            $order = 'c.channel_count';
+//            $paiXu = 'desc';
+        }
+        /*********************************************/
+        $where = [];
+        if((!empty($one_cate_id)) && (!empty($two_cate_id))){
+            if(!empty($brand_id)){
+                $where = [
+                    ['b.supplier_id','=',$sup_id],
+                    ['a.brand_id','=',$brand_id],
+                    ['a.bb_cate1','=',$one_cate_id],
+                    ['a.bb_cate2','=',$two_cate_id]
+                ];
+            }else{
+                $where = [
+                    ['b.supplier_id','=',$sup_id],
+                    ['a.bb_cate1','=',$one_cate_id],
+                    ['a.bb_cate2','=',$two_cate_id]
+                ];
+            }
+        }elseif((!empty($one_cate_id)) || (!empty($two_cate_id))){
+            if(!empty($one_cate_id)){
+                //一级分类下的商品['a.brand_id','=',$brand_id],
+                if(!empty($brand_id)){
+                    $where = [
+                        ['b.supplier_id','=',$sup_id],
+                        ['a.bb_cate1','=',$one_cate_id],
+                        ['a.brand_id','=',$brand_id],
+                    ];
+                }else{
+                    $where = [
+                        ['b.supplier_id','=',$sup_id],
+                        ['a.bb_cate1','=',$one_cate_id],
+                    ];
+                }
+            }else{
+                //二级分类下的商品，需要查询一级分类ID
+                $one_cate_id_arr = Db::connect('db_mini_mall')->query("SELECT cate_bb1 from ims_bb_supplier_cate where cate_bb2 = {$two_cate_id}");
+                if(!empty(count($one_cate_id_arr))){
+                    $one_cate_id = !empty($one_cate_id_arr[0]['cate_bb1']) ? $one_cate_id_arr[0]['cate_bb1'] : 0;
+                }
+                if(!empty($one_cate_id)){
+                    $where = [
+                        ['b.supplier_id','=',$sup_id],
+                        ['a.bb_cate1','=',$one_cate_id],
+                        ['a.bb_cate2','=',$two_cate_id],
+                    ];
+                }else{
+                    $where = [
+                        ['b.supplier_id','=',$sup_id],
+                        ['a.bb_cate2','=',$two_cate_id],
+                    ];
+                }
+                if(!empty($brand_id)){
+                    $where[] = ['a.brand_id','=',$brand_id];
+                }
+            }
+        }else{
+            if(!empty($brand_id)){
+                $where = [
+                    ['b.supplier_id','=',$sup_id],
+                    ['a.brand_id','=',$brand_id],
+                ];
+            }else{
+                sdk_return('', 6, '缺少参数');
+            }
+        }
+
+        //是否为需要展示新添加商品的用户
+//        $openids
+        $manager_where = [
+            ['sup_id','=',$sup_id],
+            ['openid','=',$openids],
+            ['status','=',1],
+        ];
+        $is_special_user = Db::connect('db_mini_mall')->table('ims_yd_supplier_manager')->where($manager_where)->find();
+        $whereOr = [];
+        if(!empty($is_special_user)){
+            //需要展示
+//            $whereOr[] = ['a.is_activity','=',1];
+        }else{
+            //不需要展示
+//            $where[] = ['a.is_activity','<>',1];
+            $where[] = ['a.is_activity','=',0];
+        }
+        //查询当前购买c端店铺的点位地址
+        $user_area_id = Db::connect('db_btj_new')->table('potential_customer')->field('area_id,address')->where('is_validity = 1 and xcx_openid = "'.$openids.'"')->find();
+//        echo Db::connect('db_btj_new')->getLastSql();exit;
+        if(empty($user_area_id['area_id'])){
+            //没有area_id,调用高德接口获取
+            if(!empty($user_area_id['address'])){
+                $url = "https://restapi.amap.com/v3/geocode/geo?output=JSON&key=ea30dd0bc2c1f965f535433fd54d292d&address=".preg_replace('# #','',$user_area_id['address']);
+// 执行请求
+                $ch = curl_init();
+                curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+                curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+                curl_setopt($ch, CURLOPT_URL, $url);
+                $data = curl_exec($ch);
+                curl_close($ch);
+                $result = json_decode($data, true);
+                $location = $result['geocodes'][0]['location'];
+                $loca = explode(',',$location);
+//                var_dump($location.$result['geocodes'][0]['province'].",".$result['geocodes'][0]['city'].",".$result['geocodes'][0]['district'].":".$i++);
+                if($location) {
+                    //省码
+                    $province_arr = Db::connect('db_wehub')->table('regionh')->field('id')->where('parent_id = 0 and name = "'.$result['geocodes'][0]['province'].'"')->find();
+                    $province = $province_arr['id'] > 0 ? $province_arr['id'] : '0';
+                    //市码
+                    $city_arr = Db::connect('db_wehub')->table('regionh')->field('id')->where('parent_id = '.$province.' and name = "'.mb_substr($result['geocodes'][0]['city'],0,mb_strlen($result['geocodes'][0]['city'])-1).'"')->find();
+                    $city = $city_arr['id'] > 0 ? $city_arr['id'] : '0';
+                    //区码
+                    $area_arr = Db::connect('db_wehub')->table('regionh')->field('id')->where('parent_id = '.$city.' and name = "'.$result['geocodes'][0]['district'].'"')->find();
+                    $area = $area_arr['id'] > 0 ? $area_arr['id'] : '0';
+                    $area_id = $area;
+                }
+            }
+        }else{
+            $area_id = $user_area_id['area_id'];
+        }
+        $area_where = '';
+        if(!empty($area_id)){
+            $area_where = ' ((a.goods_area = 0) or (a.goods_area <> 0 and a.goods_area like "%'.$area_id.'%"))';
+        }else{
+            $area_where = ' (a.goods_area = 0) ';
+        }
+        $where[] = ['a.status','=',1];
+        $where[] = ['b.status','=',1];
+        $where[] = ['a.total','>',0];
+        $where[] = ['a.deleted','=',0];
+        $goods_arr = Db::connect('db_mini_mall')->table('ims_ewei_shop_goods')->alias('a')->leftJoin('ims_yd_supplier_goods b','a.id = b.goods_id')->leftJoin('ims_bb_city_sku c','a.skuid = c.sku_id')->where($where)->where($area_where)->field('a.id,a.title,a.thumb,a.sale_pirce as supplier_price,a.skuid,a.salesreal,a.bb_start_count,a.bb_end_count,a.bb_step,a.total,a.sale_type,a.erp_total')->order($order)->paginate(10);
+//        sale_pirce  supplier_price
+//        echo Db::connect('db_mini_mall')->table('ims_ewei_shop_goods')->getLastSql();exit;
+        $data_arr = array();
+        if(!empty(count($goods_arr))){
+            foreach ($goods_arr as $key => $v){
+//                $goods_arr[$key]['supplier_price'] = $v['sale_pirce'];
+                $arr = null;
+//                $arr = Db::connect('db_mini_mall')->table('ims_ewei_shop_member_cart')->where('openid',$openids)->where('deleted',0)->where('goodsid',$v['id'])->find();
+                $arr = Db::connect('db_mini_mall')->table('ims_ewei_shop_member_cart')->where([['goodsid','=',$v['id']],['openid','=',$openids],['deleted','=',0]])->find();
+                if(!empty($arr)){
+                    $v['cart_total'] = $arr['total'];
+                    $v['cart_id'] = $arr['id'];
+                }else{
+                    $v['cart_total'] = 0;
+                    $v['cart_id'] = 0;
+                }
+
+                //查询商品报价价格
+                $hbsj_data = Db::connect('db_mini_mall')->table('ims_bb_price_list')->alias('a')->leftJoin('ims_bb_channel b','a.channel_id = b.id')->field('a.price,b.c_name')->where([['a.sku_id','=',$v['skuid']],['b.is_b2b','=',1]])->order('a.price','desc')->limit(4)->select();
+                $goods_channel_arr = array('0' => array('c_name'=>'','price'=>''), '1' => array('c_name'=>'','price'=>''), '2' => array('c_name'=>'','price'=>''), '3' => array('c_name'=>'','price'=>''), '4' => array('c_name'=>'','price'=>''));
+                if(!empty(count($hbsj_data))){
+                    foreach ($hbsj_data as $c_k => $c_v){
+                        $channel_arr = array();
+                        $channel_arr['c_name'] = $c_v['c_name'].'￥';
+                        $channel_arr['price'] = $c_v['price'];
+                        $goods_channel_arr[$c_k] = $channel_arr;
+                    }
+                }
+                $v['goods_channel_arr'] = $goods_channel_arr;
+                $v['goods_channel_res1'] = $goods_channel_arr[0]['c_name'].$goods_channel_arr[0]['price'].' '.$goods_channel_arr[1]['c_name'].$goods_channel_arr[1]['price'];
+                $v['goods_channel_res2'] = $goods_channel_arr[2]['c_name'].$goods_channel_arr[2]['price'].' '.$goods_channel_arr[3]['c_name'].$goods_channel_arr[3]['price'];
+                unset($goods_channel_arr);
+                //查询规格
+                $v['bb_spec'] = '';
+                $one_goods_id = Db::connect('db_mini_mall')->table('ims_bb_sku')->where([['id','=',$v['skuid']]])->field('spec')->find();
+                if(!empty($one_goods_id)){
+                    $v['bb_spec'] = $one_goods_id['spec'];
+                }
+                //处理销量
+//                $v['salesreal'] = ($v['salesreal'] * 10) + rand(0,10);
+                $v['salesreal'] = $this->fix_sale_count($v['id'],$v['salesreal']);
+                //查询报价数量
+//                $hbsj_data_2 = Db::connect('db_mini_mall')->table('ims_bb_city_sku')->where([['sku_id','=',$v['skuid']]])->find();
+//                $v['goods_channel_count'] = !empty($hbsj_data_2['channel_count']) ? $hbsj_data_2['channel_count'] : 0;
+                $hbsj_data_2 = Db::connect('db_mini_mall')->table('ims_bb_price_list')->alias('a')->leftJoin('ims_bb_channel b','a.channel_id = b.id')->field('a.price,b.c_name')->where([['a.sku_id','=',$v['skuid']],['b.is_b2b','=',1]])->order('a.price','desc')->count();
+                $v['goods_channel_count'] = !empty($hbsj_data_2) ? $hbsj_data_2 : 0;
+                //查询当前商品是否为抢购商品
+                $v['is_time'] = 0;//不是抢购商品
+                $is_time = Db::connect('db_mini_mall')->table('ims_goods_flash_sale')->where([['status','=',1],['endtime','>=',time()],['goods_id','=',$v['id']]])->find();
+                if(!empty($is_time)){
+                    $v['is_time'] = 1;//是抢购商品
+                }
+                $v['thumb'] = !empty($v['thumb']) ? $v['thumb'] : 'https://mallm.yundian168.com/attachment/images/xiaochengxu/zw.png';
+
+                //库存处理（是否启用erp库存）
+                if($v['sale_type'] == 1){
+                    $v['total'] = $v['erp_total'] < $v['total'] ? $v['erp_total'] : $v['total'];
+                }
+
+                $data_arr[] = $v;
+            }
+        }
+        $data = array();
+        $data['one_category'] = $one_cate_id;
+        $data['data'] = $data_arr;
+        sdk_return($data, 1, 'success');
+    }
+
+    private function fix_sale_count($id,$real_sale_count){
+        $res_sale_count = $real_sale_count;
+        if ($id <> 68293) {
+            $res_sale_count = round(($real_sale_count * 10 + date('d') * 100) / 4)+date('H');
+        }
+        return $res_sale_count;
+    }
+
+    /**
+     * 首页品牌推荐
+     */
+    public function getRecBrand(){
+        $rec_brand_img = array(
+            'http://oss.yundian168.com/ydxq/img/system/brand/brand_1.png',
+            'http://oss.yundian168.com/ydxq/img/system/brand/brand_2.png',
+            'http://oss.yundian168.com/ydxq/img/system/brand/brand_3.png',
+            'http://oss.yundian168.com/ydxq/img/system/brand/brand_4.png',
+            'http://oss.yundian168.com/ydxq/img/system/brand/brand_5.png',
+            'http://oss.yundian168.com/ydxq/img/system/brand/brand_6.png',
+        );
+        $param = $this->request_param;
+        $sup_id = !empty($param['sup_id']) ? $param['sup_id'] : sdk_return('', 6, '缺少参数');
+//        $rec_brand_arr = Db::connect('db_mini_mall')->table('ims_bb_brand')->order('price_count','desc')->limit(6)->select();
+//        $rec_brand_arr = Db::connect('db_mini_mall')->query("SELECT b.*,a.cate_id from ims_bb_supplier_cate_brand as a left join ims_bb_brand as b on a.brand_id = b.id where a.is_home = 1 and a.sup_id = {$sup_id} group by a.brand_id order by a.pxid desc,id desc");
+        $rec_brand_arr = Db::connect('db_mini_mall')->query("SELECT c.*,sum(c.sku_count) as new_count from (SELECT a.*,sum(a.sku_count) as new_sku_count,b.b_name from ims_bb_supplier_cate_brand as a LEFT JOIN ims_bb_brand as b on a.brand_id = b.id WHERE a.sup_id = {$sup_id} GROUP BY a.brand_id,a.cate_id) as c GROUP BY c.brand_id order by new_count desc limit 6");
+        $rec_brand_data = array();
+        if(!empty(count($rec_brand_arr))){
+            foreach ($rec_brand_arr as $key => $value){
+                //查询在该店铺下的在售数量
+//                $goods_count = Db::connect('db_mini_mall')->table('ims_ewei_shop_goods')->alias('a')->leftJoin('ims_yd_supplier_goods b','a.id = b.goods_id')->where([['b.supplier_id','=',$sup_id],['a.status','=',1],['b.status','=',1],['brand_id','=',$value['id']]])->count('a.id');
+//                $value['sup_count'] = $goods_count;
+                $value['sup_count'] = $value['new_count'];
+                $value['brand_img'] = $rec_brand_img[$key];
+                //根据品牌cate_id查询一级分类ID
+                $value['cate_bb2'] = $value['cate_id'];
+                $cate_bb1_arr = Db::connect('db_mini_mall')->table('ims_bb_supplier_cate')->where([['sup_id','=',$sup_id],['cate_bb2','=',$value['cate_id']]])->find();
+                $value['cate_bb1'] = 0;
+                if(!empty($cate_bb1_arr)){
+                    $value['cate_bb1'] = $cate_bb1_arr['cate_bb1'];
+                }
+
+//                2019年10月9日14:30:56
+                $value['cate_bb1'] = 0;
+                $value['cate_bb2'] = 0;
+                $rec_brand_data[] = $value;
+            }
+            $rec_brand_data = arraySequence($rec_brand_data,'sup_count');
+        }
+        sdk_return($rec_brand_data, 1, 'success');
+    }
+
+    /**
+     * 品牌列表
+     */
+    public function getAllBrand(){
+        $param = $this->request_param;
+        $sup_id = !empty($param['sup_id']) ? $param['sup_id'] : sdk_return('', 6, '缺少参数');
+        $page = !empty($param['page']) ? $param['page'] : 1;
+//        $brand_arr = Db::connect('db_mini_mall')->table('ims_bb_brand')->order('price_count','desc')->paginate(10)->toArray();
+//        echo Db::connect('db_mini_mall')->getLastSql();exit;
+//        $brand_arr = Db::connect('db_mini_mall')->table('ims_bb_supplier_cate_brand')->alias('a')->leftJoin('ims_bb_brand b','a.brand_id = b.id')->where([['a.sup_id','=',$sup_id]])->field('b.*,a.cate_id')->order('b.skuid_count','desc')->group('a.brand_id')->paginate(10)->toArray();
+//        $pagesize = 1000;
+        $pagesize = 15;
+        if($page == 1){
+            $start = 0;
+        }else{
+            $start = $pagesize * ($page - 1);
+        }
+        $brand_arr = Db::connect('db_mini_mall')->query("SELECT c.*,sum(c.sku_count) as new_count from (SELECT a.*,sum(a.sku_count) as new_sku_count,b.b_name from ims_bb_supplier_cate_brand as a LEFT JOIN ims_bb_brand as b on a.brand_id = b.id WHERE a.sup_id = {$sup_id} GROUP BY a.brand_id,a.cate_id) as c GROUP BY c.brand_id HAVING new_count > 0 order by new_count desc limit {$start},{$pagesize}");
+        $rec_brand_data = array();
+        if(!empty($brand_arr)) {
+//            $brand_data = $brand_arr['data'];
+//            foreach ($brand_data as $key => $value){
+            foreach ($brand_arr as $key => $value){
+                //查询在该店铺下的在售数量
+//                $goods_count = Db::connect('db_mini_mall')->table('ims_ewei_shop_goods')->alias('a')->leftJoin('ims_yd_supplier_goods b','a.id = b.goods_id')->where([['b.supplier_id','=',$sup_id],['a.status','=',1],['b.status','=',1],['brand_id','=',$value['id']]])->count('a.id');
+//                $goods_count = Db::connect('db_mini_mall')->table('ims_bb_supplier_cate_brand')->where([['brand_id','=',$value['id']]])->count('id');
+//                $value['sup_count'] = $goods_count;
+                $value['sup_count'] = $value['new_count'];
+                //根据品牌cate_id查询一级分类ID
+                $value['cate_bb2'] = $value['cate_id'];
+                if(in_array($value['cate_bb2'],array(72,73))){
+                    continue;
+                }
+                $cate_bb1_arr = Db::connect('db_mini_mall')->table('ims_bb_supplier_cate')->where([['sup_id','=',$sup_id],['cate_bb2','=',$value['cate_id']]])->find();
+                $value['cate_bb1'] = 0;
+                if(!empty($cate_bb1_arr)){
+                    $value['cate_bb1'] = $cate_bb1_arr['cate_bb1'];
+                }
+                //                2019年10月9日14:30:56
+                $value['cate_bb1'] = 0;
+                $value['cate_bb2'] = 0;
+                $rec_brand_data[] = $value;
+            }
+        }
+        sdk_return($rec_brand_data, 1, 'success');
+    }
+}

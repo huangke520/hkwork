@@ -1,0 +1,828 @@
+<?php
+/**
+ * ERP 接口
+ * Created by zsl
+ * Author: zsl
+ * Date: 2019-08-15
+ * Time: 19:39
+ */
+
+namespace app\api\controller;
+require_once __DIR__ . '/../../../vendor/erp_sdk/TopSdk.php';
+
+use app\api\controller\BaseController;
+
+use app\api\model\ydxq\ShopGoods;
+use app\api\model\ydxq\ShopGoodsErp;
+use app\api\model\ydxq\ShopMember;
+use app\api\model\ydxq\ShopOrder;
+use app\api\model\ydxq\ShopOrderGoods;
+use app\api\model\ydxq\Supplier;
+use app\api\model\ydxq\SupplierGoods;
+use app\api\model\ydxq\OrderErpLog;
+use app\api\model\ydxq\ExchangeOrder;
+use app\api\model\ydxq\ExchangeGoods;
+
+use OrderUploadRequest;
+use ItemUploadRequest;
+use GoodsTotalQueryRequest;
+
+use app\api\validate\Erp as ErpValidate;
+
+use think\facade\Config;
+use think\facade\Log;
+
+class Erp extends BaseController
+{
+
+    protected $appKey;
+    protected $secretKey;
+    protected $sessionKey;
+    protected $serverUrl;
+    protected $shopId;
+
+    protected $m_ShopOrderModel;
+    protected $m_ShopOrderGoodsModel;
+    protected $m_ShopGoodsModel;
+    protected $m_ShopGoodsErpModel;
+    protected $m_ShopMemberModel;
+    protected $m_SupplierModel;
+    protected $m_SupplierGoodsModel;
+    protected $m_OrderErpLogModel;
+    protected $m_ExchangeOrderModel;
+    protected $m_ExchangeGoodsModel;
+
+    public function __construct()
+    {
+        parent::__construct();
+
+        $this->appKey       = Config::get('erp.appKey');
+        $this->secretKey    = Config::get('erp.secretKey');
+        $this->sessionKey   = Config::get('erp.sessionKey');
+        $this->serverUrl    = Config::get('erp.serverUrl');
+        $this->shopId       = Config::get('erp.shopId'); // 店铺ID
+
+        $this->m_ShopOrderModel         = new ShopOrder();
+        $this->m_ShopOrderGoodsModel    = new ShopOrderGoods();
+        $this->m_ShopGoodsModel         = new ShopGoods();
+        $this->m_ShopMemberModel        = new ShopMember();
+        $this->m_SupplierModel          = new Supplier();
+        $this->m_OrderErpLogModel       = new OrderErpLog();
+        $this->m_SupplierGoodsModel     = new SupplierGoods();
+        $this->m_ShopGoodsErpModel      = new ShopGoodsErp();
+        $this->m_ExchangeOrderModel     = new ExchangeOrder();
+        $this->m_ExchangeGoodsModel     = new ExchangeGoods();
+    }
+
+    // 货到付款发货接口
+    public function self_order_upload()
+    {
+        $order_id = $this->request->param('order_id');
+        if (empty($order_id)){
+            Log::write('order_id为空-'.date("Y-m-d H:i:s",time()),'info');
+            return sdk_return([],0,'order_id不能为空');
+        }
+
+        $order_info = $this->m_ShopOrderModel->getInfo(['supplier_id'=>461,'id'=>$order_id]);
+        if (empty($order_info)) {
+            Log::write('订单数据为空-'.date("Y-m-d H:i:s",time()),'info');
+            return sdk_return([],0,'订单数据为空');
+        }
+
+        $client = new \TopClient();
+        $client->appKey     = $this->appKey;
+        $client->secretKey  = $this->secretKey;
+        $client->gatewayUrl  = $this->serverUrl;
+        $request = new OrderUploadRequest();
+
+        // 收货人地址处理
+        $address_arr    = $this->process_address(unserialize($order_info['address'])['address']);
+
+        $state          = $address_arr['state'];
+        $city           = $address_arr['city'];
+        $district       = $address_arr['district'];
+        $address        = $address_arr['address'];
+        $realname       = unserialize($order_info['address'])['realname'];
+        $mobile         = unserialize($order_info['address'])['mobile'];
+        $lng            = $address_arr['lng'];
+        $lat            = $address_arr['lat'];
+
+        $request->setTid($order_info['ordersn']);                       // 订单号
+        $request->setShopid($this->shopId);                             // 店铺编号
+        $request->setOrderTime($order_info['createtime']);              // 下单时间
+//        $request->setPaymentTime('15653532');                                        // 付款时间
+        $request->setBuyerNick($this->get_member_info($order_info['openid'],'nickname'));  // 买家昵称
+        $request->setReceiverState($state);         // 收件省份
+        $request->setReceiverCity($city);           // 收件城市
+        $request->setReceiverDistrict($district);   // 收件地区
+        $request->setReceiverAddress($address);     // 收件详细地址
+        $request->setReceiverName($realname);       // 收件人姓名
+        $request->setReceiverMobile($mobile);       // 收件人手机
+        $request->setPostFee(0);                           // 运费
+        $request->setPaymnet($order_info['price']);                 // 付款总金额(含运费)
+        $request->setBuyerMessage($order_info['remark']);           // 买家留言
+        $request->setSellerMemo($order_info['remark']);             // 买家备注
+        $request->setSellerFlag('5');                     // 买家备注旗帜 1.红 2.黄 3.绿 4.蓝 5.紫
+        $request->setLongitude($lng);  // 经度
+        $request->setLatitude($lat);   // 纬度
+        $request->setItems($this->get_order_goods($order_info['id']));
+        $result = $client->execute($request,$this->sessionKey);
+
+        if ($result['code'] == '0000') {
+            Log::write($result["msg"]."-".date("Y-m-d H:i:s",time()),'info');
+            sdk_return([$result['result']],1,$result['msg']);
+        } else {
+            Log::write($result["msg"]."-".date("Y-m-d H:i:s",time()),'info');
+            sdk_return([],0,$result['msg']);
+        }
+    }
+
+    // 货到付款自动提交到ERP
+    public function self_order_upload_timer()
+    {
+        $this->self_order_upload_timer_new();
+        die;
+        // 订单查询 创建时间大于 2019-08-22 00:00:00 的数据 已确认，货到付款
+        $order_list = $this->m_ShopOrderModel->getAllList([['supplier_id','=',461],['status','=',2],['order_type','=',2],['createtime','>','1566403200']]);
+        $client = new \TopClient();
+        $client->appKey     = $this->appKey;
+        $client->secretKey  = $this->secretKey;
+        $client->gatewayUrl  = $this->serverUrl;
+        $request = new OrderUploadRequest();
+
+        foreach ($order_list as $k => $v) {
+            $address_arr = null;
+            $self_info = null;
+            if ($v['delivery_type'] == 1) { // 配送
+                $address_arr    = $this->process_address(unserialize($v['address'])['address']);
+                $state          = $address_arr['state'];
+                $city           = $address_arr['city'];
+                $district       = $address_arr['district'];
+                $address        = $address_arr['address'];
+                $realname       = unserialize($v['address'])['realname'];
+                $mobile         = unserialize($v['address'])['mobile'];
+                $lng            = $address_arr['lng'];
+                $lat            = $address_arr['lat'];
+            } else { // 自提，需要获取商家地址
+                $self_info      = $this->process_self_info($v['supplier_id']);
+                $address_arr    = $this->process_address($self_info['address']);
+                $state          = $address_arr['state'];
+                $city           = $address_arr['city'];
+                $district       = $address_arr['district'];
+                $address        = $address_arr['address'];
+                $realname       = $self_info['real_name'];
+                $mobile         = $self_info['phone'];
+                $lng            = $address_arr['lng'];
+                $lat            = $address_arr['lat'];
+            }
+
+            $request->setTid($v['ordersn']);                                                // 订单号
+            $request->setShopid($this->shopId);                                             // 店铺编号
+            $request->setOrderTime($v['createtime']);                                       // 下单时间
+//            $request->setPaymentTime($v['paytime']);                                        // 付款时间
+            $request->setBuyerNick($this->get_member_info($v['openid'],'nickname'));  // 买家昵称
+            $request->setReceiverState($state);         // 收件省份
+            $request->setReceiverCity($city);           // 收件城市
+            $request->setReceiverDistrict($district);   // 收件地区
+            $request->setReceiverAddress($address);     // 收件详细地址
+            $request->setReceiverName($realname);       // 收件人姓名
+            $request->setReceiverMobile($mobile);       // 收件人手机
+            $request->setPostFee(0);                           // 运费
+            $request->setPaymnet($v['price']);                          // 付款总金额(含运费)
+            $request->setBuyerMessage($v['remark']);                    // 买家留言
+            $request->setSellerMemo($v['remark']);                      // 买家备注
+            $request->setSellerFlag('3');                     // 买家备注旗帜 1.红 2.黄 3.绿 4.蓝 5.紫
+            $request->setLongitude($lng);  // 经度
+            $request->setLatitude($lat);   // 纬度
+            $request->setItems($this->get_order_goods($v['id']));
+            $result = $client->execute($request,$this->sessionKey);
+
+            $data_str = 'ordersn:'.$v['ordersn'];
+            $data_str .= 'shopId:'.$this->shopId;
+            $data_str .= 'createtime:'.$v['createtime'];
+            $data_str .= 'nickname:'. $this->get_member_info($v['openid'],'nickname');
+            $data_str .= 'state:'. $state;
+            $data_str .= 'city:'. $city;
+            $data_str .= 'district:'. $district;
+            $data_str .= 'address:'. $address;
+            $data_str .= 'realname:'. $realname;
+            $data_str .= 'mobile:'. $mobile;
+            $data_str .= 'price:'. $v['price'];
+            $data_str .= 'remark:'. $v['remark'];
+            $data_str .= 'lng:'. $lng;
+            $data_str .= 'lat:'. $lat;
+            Log::write('order_array:'.$data_str,'info');
+            // 记录日志
+            Log::write($result['msg'].'-['.date('Y-m-d H:i:s',time()).']','info');
+        }
+    }
+
+    // 订单上传接口
+    public function self_order_upload_timer_new(){
+        //24小时之前的时间戳
+        $time_delay = 24 * 10 * 60 * 60;
+        $today_before_time = strtotime(date("Y-m-d", time() - $time_delay));
+
+        //查询日志，获取不需要同步到erp的订单号（同步成功和重复同步状态码）。
+        $order_log_where = "status in (0,1011) and create_time > '".$today_before_time."'";
+        $order_ids = $this->m_OrderErpLogModel->getAllListPro($order_log_where, ['order_id']);
+        $not_in_order_ids = array_column($order_ids, 'order_id');
+
+        $not_in_order_ids = implode(',', array_merge($not_in_order_ids, [0]));
+
+        // 订单查询 创建时间大于 今天凌晨 的数据
+        $order_where = "supplier_id = 461 and status = 2 and order_type = 2 and createtime > '".$today_before_time."' and id not in ({$not_in_order_ids})";
+        $order_list = $this->m_ShopOrderModel->getAllList($order_where);
+
+        $client = new \TopClient();
+        $client->appKey     = $this->appKey;
+        $client->secretKey  = $this->secretKey;
+        $client->gatewayUrl  = $this->serverUrl;
+        $request = new OrderUploadRequest();
+
+        $logs = [];
+        foreach ($order_list as $k => $v) {
+            $address_arr = null;
+            $self_info = null;
+            if ($v['delivery_type'] == 1) { // 配送
+                $address_arr    = $this->process_address(unserialize($v['address'])['address']);
+                $state          = $address_arr['state'];
+                $city           = $address_arr['city'];
+                $district       = $address_arr['district'];
+                $address        = $address_arr['address'];
+                $realname       = unserialize($v['address'])['realname'];
+                $mobile         = unserialize($v['address'])['mobile'];
+                $lng            = $address_arr['lng'];
+                $lat            = $address_arr['lat'];
+            } else { // 自提，需要获取商家地址
+                $self_info      = $this->process_self_info($v['supplier_id']);
+                $address_arr    = $this->process_address($self_info['address']);
+                $state          = $address_arr['state'];
+                $city           = $address_arr['city'];
+                $district       = $address_arr['district'];
+                $address        = $address_arr['address'];
+                $realname       = $self_info['real_name'];
+                $mobile         = $self_info['phone'];
+                $lng            = $address_arr['lng'];
+                $lat            = $address_arr['lat'];
+            }
+
+            $request->setTid($v['ordersn']);                                                // 订单号
+            $request->setShopid($this->shopId);                                             // 店铺编号
+            $request->setOrderTime($v['createtime']);                                       // 下单时间
+            $request->setPaymentTime($v['paytime']);                                        // 付款时间
+            $request->setBuyerNick($this->get_member_info($v['openid'],'nickname'));  // 买家昵称
+            $request->setReceiverState($state);         // 收件省份
+            $request->setReceiverCity($city);           // 收件城市
+            $request->setReceiverDistrict($district);   // 收件地区
+            $request->setReceiverAddress($address);     // 收件详细地址
+            $request->setReceiverName($realname);       // 收件人姓名
+            $request->setReceiverMobile($mobile);       // 收件人手机
+            $request->setPostFee(0);                           // 运费
+            $request->setPaymnet($v['price']);                          // 付款总金额(含运费)
+            $request->setBuyerMessage($v['remark']);                    // 买家留言
+            $request->setSellerMemo($v['remark']);                      // 买家备注
+            $request->setSellerFlag('1');                     // 买家备注旗帜 1.红 2.黄 3.绿 4.蓝 5.紫
+            $request->setLongitude($lng);  // 经度
+            $request->setLatitude($lat);   // 纬度
+            $request->setItems($this->get_order_goods($v['id']));
+            $result = $client->execute($request,$this->sessionKey);
+            //$result = ['code'=>0000, 'msg'=>1234];
+            // 记录日志
+            Log::write($result['msg'],'info');
+            //记录文件日志
+            $log_data = [
+                'order_id'      =>  $v['id'],//订单id
+                'order_sn'      =>  $v['ordersn'],//订单号
+                'status'        =>  $result['code'],
+                'res_text'      =>  json_encode($result),
+                'create_time'   =>  time(),
+                'type'          =>  2,
+            ];
+            $logs[] = $log_data;
+
+            //同步当前订单关联的兑换单到erp
+            $this->upload_exchange_order_to_erp($v['id']);
+
+        }
+        //插入日志文件
+        $this->m_OrderErpLogModel->insertMore($logs);
+    }
+
+    // 订单上传接口
+    public function order_upload()
+    {
+        $this->order_upload_new();
+        die;
+
+        // 订单查询 创建时间大于 2019-08-19 00:00:00 的数据
+        $order_list = $this->m_ShopOrderModel->getAllList([['supplier_id','=',461],['status','=',1],['createtime','>','1566144000']]);
+        $client = new \TopClient();
+        $client->appKey     = $this->appKey;
+        $client->secretKey  = $this->secretKey;
+        $client->gatewayUrl  = $this->serverUrl;
+        $request = new OrderUploadRequest();
+
+        foreach ($order_list as $k => $v) {
+            $address_arr = null;
+            $self_info = null;
+            if ($v['delivery_type'] == 1) { // 配送
+                $address_arr    = $this->process_address(unserialize($v['address'])['address']);
+                $state          = $address_arr['state'];
+                $city           = $address_arr['city'];
+                $district       = $address_arr['district'];
+                $address        = $address_arr['address'];
+                $realname       = unserialize($v['address'])['realname'];
+                $mobile         = unserialize($v['address'])['mobile'];
+                $lng            = $address_arr['lng'];
+                $lat            = $address_arr['lat'];
+            } else { // 自提，需要获取商家地址
+                $self_info      = $this->process_self_info($v['supplier_id']);
+                $address_arr    = $this->process_address($self_info['address']);
+                $state          = $address_arr['state'];
+                $city           = $address_arr['city'];
+                $district       = $address_arr['district'];
+                $address        = $address_arr['address'];
+                $realname       = $self_info['real_name'];
+                $mobile         = $self_info['phone'];
+                $lng            = $address_arr['lng'];
+                $lat            = $address_arr['lat'];
+            }
+
+            $request->setTid($v['ordersn']);                                                // 订单号
+            $request->setShopid($this->shopId);                                             // 店铺编号
+            $request->setOrderTime($v['createtime']);                                       // 下单时间
+            $request->setPaymentTime($v['paytime']);                                        // 付款时间
+            $request->setBuyerNick($this->get_member_info($v['openid'],'nickname'));  // 买家昵称
+            $request->setReceiverState($state);         // 收件省份
+            $request->setReceiverCity($city);           // 收件城市
+            $request->setReceiverDistrict($district);   // 收件地区
+            $request->setReceiverAddress($address);     // 收件详细地址
+            $request->setReceiverName($realname);       // 收件人姓名
+            $request->setReceiverMobile($mobile);       // 收件人手机
+            $request->setPostFee(0);                           // 运费
+            $request->setPaymnet($v['price']);                          // 付款总金额(含运费)
+            $request->setBuyerMessage($v['remark']);                    // 买家留言
+            $request->setSellerMemo($v['remark']);                      // 买家备注
+            $request->setSellerFlag('1');                     // 买家备注旗帜 1.红 2.黄 3.绿 4.蓝 5.紫
+            $request->setLongitude($lng);  // 经度
+            $request->setLatitude($lat);   // 纬度
+            $request->setItems($this->get_order_goods($v['id']));
+            $result = $client->execute($request,$this->sessionKey);
+            // 记录日志
+            Log::write($result['msg'],'info');
+        }
+    }
+
+    // 订单上传接口
+    public function order_upload_new(){
+        //24小时之前的时间戳
+        $time_delay = 24 * 10 * 60 * 60;
+        $today_before_time = strtotime(date("Y-m-d", time() - $time_delay));
+
+        //查询日志，获取不需要同步到erp的订单号（同步成功和重复同步状态码）。
+        $order_log_where = " status in (0,1011) and create_time > '".$today_before_time."'";
+        $order_ids = $this->m_OrderErpLogModel->getAllListPro($order_log_where, ['order_id']);
+        $not_in_order_ids = array_column($order_ids, 'order_id');
+
+        $not_in_order_ids = implode(',', array_merge($not_in_order_ids, [0]));
+
+        // 订单查询 创建时间大于 今天凌晨 的数据
+        $order_where = "supplier_id = 461 and status = 1 and order_type = 2 and createtime > '".$today_before_time."' and id not in ({$not_in_order_ids})";
+
+        $order_list = $this->m_ShopOrderModel->getAllList($order_where);
+
+        $client = new \TopClient();
+        $client->appKey     = $this->appKey;
+        $client->secretKey  = $this->secretKey;
+        $client->gatewayUrl  = $this->serverUrl;
+        $request = new OrderUploadRequest();
+
+        $logs = [];
+        foreach ($order_list as $k => $v) {
+            $address_arr = null;
+            $self_info = null;
+            if ($v['delivery_type'] == 1) { // 配送
+                $address_arr    = $this->process_address(unserialize($v['address'])['address']);
+                $state          = $address_arr['state'];
+                $city           = $address_arr['city'];
+                $district       = $address_arr['district'];
+                $address        = $address_arr['address'];
+                $realname       = unserialize($v['address'])['realname'];
+                $mobile         = unserialize($v['address'])['mobile'];
+                $lng            = $address_arr['lng'];
+                $lat            = $address_arr['lat'];
+            } else { // 自提，需要获取商家地址
+                $self_info      = $this->process_self_info($v['supplier_id']);
+                $address_arr    = $this->process_address($self_info['address']);
+                $state          = $address_arr['state'];
+                $city           = $address_arr['city'];
+                $district       = $address_arr['district'];
+                $address        = $address_arr['address'];
+                $realname       = $self_info['real_name'];
+                $mobile         = $self_info['phone'];
+                $lng            = $address_arr['lng'];
+                $lat            = $address_arr['lat'];
+            }
+
+            $request->setTid($v['ordersn']);                                                // 订单号
+            $request->setShopid($this->shopId);                                             // 店铺编号
+            $request->setOrderTime($v['createtime']);                                       // 下单时间
+            $request->setPaymentTime($v['paytime']);                                        // 付款时间
+            $request->setBuyerNick($this->get_member_info($v['openid'],'nickname'));  // 买家昵称
+            $request->setReceiverState($state);         // 收件省份
+            $request->setReceiverCity($city);           // 收件城市
+            $request->setReceiverDistrict($district);   // 收件地区
+            $request->setReceiverAddress($address);     // 收件详细地址
+            $request->setReceiverName($realname);       // 收件人姓名
+            $request->setReceiverMobile($mobile);       // 收件人手机
+            $request->setPostFee(0);                           // 运费
+            $request->setPaymnet($v['price']);                          // 付款总金额(含运费)
+            $request->setBuyerMessage($v['remark']);                    // 买家留言
+            $request->setSellerMemo($v['remark']);                      // 买家备注
+            $request->setSellerFlag('1');                     // 买家备注旗帜 1.红 2.黄 3.绿 4.蓝 5.紫
+            $request->setLongitude($lng);  // 经度
+            $request->setLatitude($lat);   // 纬度
+            $request->setItems($this->get_order_goods($v['id']));
+            $result = $client->execute($request,$this->sessionKey);
+            //$result = ['code'=>0000, 'msg'=>1234];
+            // 记录日志
+            Log::write($result['msg'],'info');
+            //记录文件日志
+            $log_data = [
+                'order_id'      =>  $v['id'],//订单id
+                'order_sn'      =>  $v['ordersn'],//订单号
+                'status'        =>  $result['code'],
+                'res_text'      =>  json_encode($result),
+                'create_time'   =>  time(),
+                'type'          =>  1,
+            ];
+            $logs[] = $log_data;
+
+            //同步当前订单关联的兑换单到erp
+            $this->upload_exchange_order_to_erp($v['id']);
+        }
+        //插入日志文件
+        $this->m_OrderErpLogModel->insertMore($logs);
+    }
+
+    //兑换商品上传到erp
+    public function upload_exchange_order_to_erp($order_id = 0){
+        if(empty($order_id)){
+            return true;
+        }
+        //获取当前订单所有关联的兑换商品
+        $order_list = $this->m_ExchangeOrderModel->getAllList(['shop_order_id'=>$order_id]);
+        if(!count($order_list)){
+            return true;
+        }
+        $client = new \TopClient();
+        $client->appKey     = $this->appKey;
+        $client->secretKey  = $this->secretKey;
+        $client->gatewayUrl  = $this->serverUrl;
+        $request = new OrderUploadRequest();
+
+        $logs = [];
+        foreach ($order_list as $k => $v) {
+            $address_arr = null;
+            $self_info = null;
+            if ($v['delivery_type'] == 1) { // 配送
+                $address_arr    = $this->process_address($v['address']);
+                $state          = $address_arr['state'];
+                $city           = $address_arr['city'];
+                $district       = $address_arr['district'];
+                $address        = $address_arr['address'];
+                $realname       = empty($v['username']) ? "未知" : $v['username'];
+                $mobile         = empty($v['mobile']) ? "未知" : $v['mobile'];
+                $lng            = $address_arr['lng'];
+                $lat            = $address_arr['lat'];
+            } else { // 自提，需要获取商家地址
+                $self_info      = $this->process_self_info($v['supplier_id']);
+                $address_arr    = $this->process_address($self_info['address']);
+                $state          = $address_arr['state'];
+                $city           = $address_arr['city'];
+                $district       = $address_arr['district'];
+                $address        = $address_arr['address'];
+                $realname       = $self_info['real_name'];
+                $mobile         = $self_info['phone'];
+                $lng            = $address_arr['lng'];
+                $lat            = $address_arr['lat'];
+            }
+
+            $request->setTid($v['orderno']);                                                // 订单号
+            $request->setShopid($this->shopId);                                             // 店铺编号
+            $request->setOrderTime($v['createtime']);                                       // 下单时间
+            $request->setPaymentTime($v['paytime']);                                        // 付款时间
+            $request->setBuyerNick($this->get_member_info($v['openid'],'nickname'));  // 买家昵称
+            $request->setReceiverState($state);         // 收件省份
+            $request->setReceiverCity($city);           // 收件城市
+            $request->setReceiverDistrict($district);   // 收件地区
+            $request->setReceiverAddress($address);     // 收件详细地址
+            $request->setReceiverName($realname);       // 收件人姓名
+            $request->setReceiverMobile($mobile);       // 收件人手机
+            $request->setPostFee(0);                           // 运费
+            $request->setPaymnet(0.02);                          // 付款总金额(含运费)
+            $request->setBuyerMessage('');                    // 买家留言
+            $request->setSellerMemo('');                      // 买家备注
+            $request->setSellerFlag('1');                     // 买家备注旗帜 1.红 2.黄 3.绿 4.蓝 5.紫
+            $request->setLongitude($lng);  // 经度
+            $request->setLatitude($lat);   // 纬度
+            $request->setItems($this->get_exchange_order_goods($v['goodsid'], $v['total']));
+            $result = $client->execute($request,$this->sessionKey);
+            //$result = ['code'=>0000, 'msg'=>1234];
+            // 记录日志
+            Log::write($result['msg'],'info');
+            //记录文件日志
+            $log_data = [
+                'order_id'      =>  $v['id'],//订单id
+                'order_sn'      =>  $v['orderno'],//订单号
+                'status'        =>  $result['code'],
+                'res_text'      =>  json_encode($result),
+                'create_time'   =>  time(),
+                'type'          =>  3,
+            ];
+            $logs[] = $log_data;
+        }
+        //插入日志文件
+        $this->m_OrderErpLogModel->insertMore($logs);
+    }
+
+    /**
+     * 获取订单明细商品信息
+     * @param $order_id
+     * @return array
+     * @throws \think\db\exception\DataNotFoundException
+     * @throws \think\db\exception\ModelNotFoundException
+     * @throws \think\exception\DbException
+     */
+    private function get_exchange_order_goods($goods_id, $total){
+        $goods_info = $this->m_ExchangeGoodsModel->getInfo(['id'=>$goods_id]);
+        if(empty($total)){//2019.9.11因为erp不让同步num为0的数据，货到付款订单，可以去掉商品，数量为0,
+            return [];
+        }
+        $temp[] = [
+            'prd_no'        =>  $goods_info['shop_goods_id'],
+            'sku_no'        =>  $goods_info['shop_goods_id'],
+            'name'          =>  str_replace('*','/',$goods_info['title']),
+            'price'         =>  0.02,
+            'num'           =>  $total,
+            'payment'       =>  0.02,
+            'oid'           =>  $goods_info['id']
+        ];
+        return $temp;
+    }
+
+    // 商品上传接口
+    public function goods_upload()
+    {
+        $param = input('post.');
+        // 参数验证
+        $validate = new ErpValidate();
+        if (!$validate->scene('goods_upload')->check($param)) {
+            sdk_return([],0,$validate->getError());
+        }
+
+        $goods_code = $param['goods_code'];
+        $goods_name = $param['goods_name'];
+        $goods_pic  = $param['goods_pic'];
+
+        $client = new \TopClient();
+        $client->appKey         = $this->appKey;
+        $client->secretKey      = $this->secretKey;
+        $client->gatewayUrl     = $this->serverUrl;
+
+        $request = new ItemUploadRequest();
+
+        $request->setPrdNo($goods_code); // 商品编号
+        $request->setName($goods_name); // 商品名称
+        $request->setPic($goods_pic); // 图片地址
+        $request->setEnabled(1); // 0:不启用，1:启用  默认0
+
+        $arr = [
+            ['sku_no' => $goods_code,'properties_name' => '件']
+        ];
+
+        $request->setSkus($arr);
+        $result = $client->execute($request, $this->sessionKey);
+        if ($result['code'] == '0000') {
+            sdk_return([$result['result']],1,$result['msg']);
+        } else {
+            sdk_return([],0,$result['msg']);
+        }
+    }
+
+    /**
+     * 获取订单明细商品信息
+     * @param $order_id
+     * @return array
+     * @throws \think\db\exception\DataNotFoundException
+     * @throws \think\db\exception\ModelNotFoundException
+     * @throws \think\exception\DbException
+     */
+    private function get_order_goods($order_id)
+    {
+        $goods_list = $this->m_ShopOrderGoodsModel->getAllList(['orderid'=>$order_id]);
+        $temp = [];
+        foreach ($goods_list as $k => $v) {
+			if(empty($v['total'])){//2019.9.11因为erp不让同步num为0的数据，货到付款订单，可以去掉商品，数量为0,
+				continue;
+			}
+
+            $goods_info = $this->m_ShopGoodsModel->getInfoPro(['id'=>$v['goodsid']],['title', 'is_activity']);
+            $name = str_replace('*','/',$goods_info['title']);
+
+            //10、21活动商品存放普通商品goods_id
+            $v['goodsid'] = $goods_info['is_activity'] > 0 ? $goods_info['is_activity'] : $v['goodsid'];
+
+            $temp[$k]['prd_no']     = $v['goodsid'];
+            $temp[$k]['sku_no']     = $v['goodsid'];
+            $temp[$k]['name']       = $name;
+            $temp[$k]['price']      = $v['total'] != 0 ? number_format($v['price'] / $v['total'],2) : 0;
+            $temp[$k]['num']        = $v['total'];  // 销售数量
+            $temp[$k]['payment']    = $v['price'];  // 销售金额
+            $temp[$k]['oid']        = $v['id'];     // 订单每条明细的子ID，用来处理部分退款
+        }
+
+        return $temp;
+
+    }
+
+    /**
+     * 获取用户昵称
+     * @param $openid
+     * @param $field
+     * @return mixed|string
+     * @throws \think\db\exception\DataNotFoundException
+     * @throws \think\db\exception\ModelNotFoundException
+     * @throws \think\exception\DbException
+     */
+    private function get_member_info($openid,$field)
+    {
+        $member_info = $this->m_ShopMemberModel->getInfoPro(['openid'=>$openid],[$field]);
+        return !empty($member_info[$field]) ? $member_info[$field] : '未知';
+    }
+
+    /**
+     * 处理自提店铺信息
+     * @param $supplier_id
+     * @return array|\PDOStatement|string|\think\Model|null
+     * @throws \think\db\exception\DataNotFoundException
+     * @throws \think\db\exception\ModelNotFoundException
+     * @throws \think\exception\DbException
+     */
+    private function process_self_info($supplier_id)
+    {
+        $field = ['address','phone','lat','lng','real_name'];
+        $supplier_info = $this->m_SupplierModel->getInfoPro(['id'=>$supplier_id],$field);
+        return $supplier_info;
+    }
+
+    /**
+     * 拆分详细地址，业务需要
+     * @param $address [详细地址]
+     * @return array [返回数组格式的地址]
+     */
+    private function process_address($address)
+    {
+
+        // V2 地址匹配
+        // 高德AP
+        $amap_api_url = 'https://restapi.amap.com/v3/geocode/geo';
+        $params = [
+            'address'=>$address,
+            'key'=>'ea30dd0bc2c1f965f535433fd54d292d'
+        ];
+        $api_res = $this->curl_http($amap_api_url,$params,'get');
+        $api_res_arr = json_decode($api_res,true);
+        if ($api_res_arr['status'] == 1 && !empty($api_res_arr['geocodes'])) {
+            $state      = $api_res_arr['geocodes'][0]['province'];
+            $city       = $api_res_arr['geocodes'][0]['city'];
+            $district   = $api_res_arr['geocodes'][0]['district'];
+            $location = explode(',',$api_res_arr['geocodes'][0]['location']);
+            $lng = $location[0];
+            $lat = $location[1];
+        } else {
+            $state      = '北京市';
+            $city       = '北京市';
+            $district   = '丰台区';
+            $lng = '116.349527';
+            $lat = '39.805972';
+        }
+
+        return [
+            'state'=>$state,
+            'city'=>$city,
+            'district'=>$district,
+            'lng'=>$lng,
+            'lat'=>$lat,
+            'address'=>$address,
+        ];
+    }
+
+    // curl
+    private function curl_http($url, $params = array(), $method = 'GET', $header = array(), $multi = false)
+    {
+        $opts = array(
+            CURLOPT_TIMEOUT => 30,
+            CURLOPT_RETURNTRANSFER => 1,
+            CURLOPT_SSL_VERIFYPEER => false,
+            CURLOPT_SSL_VERIFYHOST => false,
+            CURLOPT_HTTPHEADER => $header
+        );
+        switch(strtoupper($method)){
+            case 'GET':
+                $opts[CURLOPT_URL] = $url . '?' . http_build_query($params);
+                break;
+            case 'POST':
+                $params = $multi ? $params : http_build_query($params);
+                $opts[CURLOPT_URL] = $url;
+                $opts[CURLOPT_POST] = 1;
+                $opts[CURLOPT_POSTFIELDS] = $params;
+                break;
+            default:
+                return '不支持的请求方式！';
+        }
+
+        $ch = curl_init();
+        curl_setopt_array($ch, $opts);
+        $data = curl_exec($ch);
+        $error = curl_error($ch);
+        curl_close($ch);
+        if($error) exit('请求发生错误：' . $error);
+
+        return $data;
+    }
+
+    //更新本地的 erp 库存
+    public function updateGoodsErpTotal(){
+        //ini_set('max_execution_time', 300);
+        $supplier_goods_where = [
+            'supplier_id'       =>      461
+        ];
+        //获取所有的待更新商品id
+        /*$goods_ids = $this->m_SupplierGoodsModel->getColumn('goods_id', $supplier_goods_where);
+        if(!count($goods_ids)){
+            return true;
+        }*/
+
+        //请求erp基本参数
+        $client = new \TopClient();
+        $client->appKey     = $this->appKey;
+        $client->secretKey  = $this->secretKey;
+        $client->gatewayUrl  = $this->serverUrl;
+        $request = new GoodsTotalQueryRequest();
+
+
+        $request->setPrdNo('60454');
+        $request->setPageIndex(1);
+        $request->setPageSize(100);
+        $result = $client->execute($request,$this->sessionKey);
+        dump($result);
+        die;
+
+        $map = [];
+        foreach ($goods_ids as $k => $v){
+
+            $request->setPrdNo($v);
+            $request->setPageIndex(1);
+            $request->setPageSize(100);
+
+            $result = $client->execute($request,$this->sessionKey);
+
+            if ($result['code'] == '0000') {
+                //如果数据为空，跳出循环
+                if(empty($result['result']['num'])){
+                    continue;
+                }
+                //如果是正常的，更新数据
+                if($result['result']['num'] == 1){
+                    //库存
+                    $erp_total = intval($result['result']['list'][0]['qty']);
+                    //更新查询到的库存
+                    $this->m_ShopGoodsModel->updateInfo($v, ['erp_total'=>$erp_total]);
+                }else{
+                    //获取上次的库存
+                    //$shop_total = $this->m_ShopGoodsModel->getValue('erp_total', ['id'=>$v]);
+                    $shop_total = $this->m_ShopGoodsModel->getInfoPro(['id'=>$v], ['erp_total']);
+                    //获取本次总库存
+                    $erp_total = array_sum(array_column($result['result']['list'], 'qty'));
+                    //更新到日志表
+                    $data = [
+                        'syn_day'       =>  strtotime(date('Y-m-d')),
+                        'goods_id'      =>  $v,
+                        'shop_total'    =>  $shop_total['erp_total'],
+                        'erp_total'     =>  $erp_total,
+                        'create_time'   =>  time(),
+                        'erp_result'    =>  json_encode($result)
+                    ];
+                    $map[] = $data;
+                }
+            } else {
+                Log::write($result["msg"]."-".date("Y-m-d H:i:s",time()),'info');
+            }
+        }
+
+        //添加异常查询日志
+        $this->m_ShopGoodsErpModel->insertMore($map);
+    }
+}

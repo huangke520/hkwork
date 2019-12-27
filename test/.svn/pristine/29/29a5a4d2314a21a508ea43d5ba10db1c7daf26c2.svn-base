@@ -1,0 +1,250 @@
+<?php
+/**
+ * 易联云小票打印机功能类
+ * Created by zsl
+ * Author: zsl
+ * Date: 2019-08-11
+ * Time: 14:17
+ */
+namespace library;
+
+class Yilianyun
+{
+    private static $app_id;         // 应用ID
+    private static $app_secret;     // 应用密钥
+    private static $access_token;   // access_token
+    private static $print_url;      // 文本打印接口
+    private static $set_voice_url;  // 设置内置语音接口
+    private static $oauth_url;      // 获取授权接口
+    private static $add_printer_url;// 添加打印机接口
+    private static $printer_status_url; // 终端状态接口地址
+
+    /**
+     * yunPrint constructor.
+     * @param $app_id [应用ID]
+     * @param $app_secret [应用密钥]
+     * @param $access_token [access_token]
+     */
+    public function __construct($app_id,$app_secret,$access_token)
+    {
+        self::$app_id           = $app_id;
+        self::$app_secret       = $app_secret;
+        self::$access_token     = $access_token;
+        self::$print_url        = 'https://open-api.10ss.net/print/index';
+        self::$set_voice_url    = 'https://open-api.10ss.net/printer/setvoice';
+        self::$oauth_url        = 'https://open-api.10ss.net/oauth/oauth';
+        self::$add_printer_url  = 'https://open-api.10ss.net/printer/addprinter';
+        self::$printer_status_url  = 'https://open-api.10ss.net/printer/getprintstatus';
+    }
+
+    /**
+     * 打印文本
+     * @param $content [打印内容]
+     * @param $origin_id [商户系统内部订单号]
+     * @param $machine_code [终端编号]
+     * @return bool|string
+     */
+    public static function text($content,$origin_id,$machine_code)
+    {
+        $timestamp = get_time();
+        $sign = md5(self::$app_id.$timestamp.self::$app_secret);
+        $params = [
+            'client_id'     => self::$app_id,
+            'access_token'  => self::$access_token,
+            'machine_code'  => $machine_code,
+            'content'       => $content,
+            'origin_id'     => $origin_id,
+            'sign'          => $sign,
+            'id'            => self::make_uuid(),
+            'timestamp'     => $timestamp
+        ];
+        return self::curl_http(self::$print_url,$params,'post');
+    }
+
+    /**
+     * 终端授权 (永久授权)
+     * @param $machine_code [设备终端号]
+     * @param $msign [设备密钥]
+     * @param string $phone [手机号]
+     * @param string $print_name [打印机名称]
+     * @return bool|string
+     */
+    public static function add_printer($machine_code,$msign,$phone = '',$print_name = '')
+    {
+        $timestamp = get_time();
+        $sign = md5(self::$app_id.$timestamp.self::$app_secret);
+        $params = [
+            'client_id'     => self::$app_id,
+            'machine_code'  => $machine_code,
+            'msign'         => $msign,
+            'access_token'  => self::$access_token,
+            'sign'          => $sign,
+            'id'            => self::make_uuid(),
+            'timestamp'     => $timestamp,
+            'phone'         => $phone,
+            'print_name'    => $print_name,
+        ];
+
+        return self::curl_http(self::$add_printer_url,$params,'post');
+    }
+
+    /**
+     * 语音播报
+     * @param $content [需要播放的语音内容]
+     * @param $origin_id [商户系统内部订单号]
+     * @param $machine_code [机器编号]
+     * @param int $sound_volume [音量标识 1-9]
+     * @param int $sound_categories [声音类别:0普通女声，1普通男声，3合成男声，4合成女声]
+     * @return bool|string
+     */
+    public static function voice($content,$origin_id,$machine_code,$sound_volume = 1,$sound_categories = 0)
+    {
+        $timestamp = get_time();
+        $sign = md5(self::$app_id.$timestamp.self::$app_secret);
+        $voice_content = '<audio>'.$content.','.$sound_volume.','.$sound_categories.'</audio>';
+        $params = [
+            'client_id'     => self::$app_id,
+            'access_token'  => self::$access_token,
+            'machine_code'  => $machine_code,
+            'content'       => $voice_content,
+            'origin_id'     => $origin_id,
+            'sign'          => $sign,
+            'id'            => self::make_uuid(),
+            'timestamp'     => $timestamp
+        ];
+        return self::curl_http(self::$print_url,$params,'post');
+    }
+
+    /**
+     * 获取终端状态
+     * @param $machine_code [易联云打印机终端号]
+     * @return bool|string
+     */
+    public static function get_printer_status($machine_code)
+    {
+        $timestamp = get_time();
+        $sign = md5(self::$app_id.$timestamp.self::$app_secret);
+        $params = [
+            'client_id'     => self::$app_id,
+            'access_token'  => self::$access_token,
+            'machine_code'  => $machine_code,
+            'sign'          => $sign,
+            'id'            => self::make_uuid(),
+            'timestamp'     => $timestamp
+        ];
+
+        return self::curl_http(self::$printer_status_url,$params,'post');
+    }
+
+    /**
+     * 获取access_token,20次/日
+     * 注意：获取成功之后就不要再次获取了，自有应用token永久有效
+     * @return bool|string
+     */
+    public static function get_access_token()
+    {
+        $timestamp = get_time();
+        $sign = md5(self::$app_id.$timestamp.self::$app_secret);
+        $params = [
+            'client_id'     => self::$app_id,
+            'grant_type'    => 'client_credentials',
+            'sign'          => $sign,
+            'scope'         => 'all',
+            'timestamp'     => $timestamp,
+            'id'            => self::make_uuid(),
+        ];
+
+        return self::curl_http(self::$oauth_url,$params,'post');
+    }
+
+    /**
+     * 设置内置语音
+     * @param $content [播报内容]
+     * @param $aid [定义需设置的语音编号]
+     * @param $machine_code [设备编号]
+     * @param int $sound_volume [音量标识 1-9]
+     * @param int $sound_categories [声音类别:0普通女声，1普通男声，3合成男声，4合成女声]
+     * @return bool|string
+     */
+    public static function set_voice($content,$aid,$machine_code,$sound_volume = 1,$sound_categories = 0)
+    {
+        $timestamp = get_time();
+        $sign = md5(self::$app_id.$timestamp.self::$app_secret);
+        $set_content = json([$content,$sound_volume,$sound_categories]);
+        $params = [
+            'client_id'     => self::$app_id,
+            'access_token'  => self::$access_token,
+            'machine_code'  => $machine_code,
+            'content'       => $set_content,
+            'is_file'       => false,
+            'aid'           => $aid,
+            'sign'          => $sign,
+            'id'            => self::make_uuid(),
+            'timestamp'     => $timestamp
+        ];
+
+        return self::curl_http(self::$set_voice_url,$params,'post');
+    }
+
+    // 生成UUID4
+    public static function make_uuid()
+    {
+        $uuid = sprintf( '%04x%04x-%04x-%04x-%04x-%04x%04x%04x',
+            // 32 bits for "time_low"
+            mt_rand( 0, 0xffff ), mt_rand( 0, 0xffff ),
+
+            // 16 bits for "time_mid"
+            mt_rand( 0, 0xffff ),
+
+            // 16 bits for "time_hi_and_version",
+            // four most significant bits holds version number 4
+            mt_rand( 0, 0x0fff ) | 0x4000,
+
+            // 16 bits, 8 bits for "clk_seq_hi_res",
+            // 8 bits for "clk_seq_low",
+            // two most significant bits holds zero and one for variant DCE1.1
+            mt_rand( 0, 0x3fff ) | 0x8000,
+
+            // 48 bits for "node"
+            mt_rand( 0, 0xffff ), mt_rand( 0, 0xffff ), mt_rand( 0, 0xffff )
+        );
+
+        return strtoupper($uuid);
+    }
+
+    // curl
+    public static function curl_http($url, $params = array(), $method = 'GET', $header = array(), $multi = false)
+    {
+        $opts = array(
+            CURLOPT_TIMEOUT => 30,
+            CURLOPT_RETURNTRANSFER => 1,
+            CURLOPT_SSL_VERIFYPEER => false,
+            CURLOPT_SSL_VERIFYHOST => false,
+            CURLOPT_HTTPHEADER => $header
+        );
+        switch(strtoupper($method)){
+            case 'GET':
+                $opts[CURLOPT_URL] = $url . '?' . http_build_query($params);
+                break;
+            case 'POST':
+                $params = $multi ? $params : http_build_query($params);
+                $opts[CURLOPT_URL] = $url;
+                $opts[CURLOPT_POST] = 1;
+                $opts[CURLOPT_POSTFIELDS] = $params;
+                break;
+            default:
+                return '不支持的请求方式！';
+        }
+
+        $ch = curl_init();
+        curl_setopt_array($ch, $opts);
+        $data = curl_exec($ch);
+        $error = curl_error($ch);
+        curl_close($ch);
+        if($error) exit('请求发生错误：' . $error);
+
+        return $data;
+    }
+
+
+}

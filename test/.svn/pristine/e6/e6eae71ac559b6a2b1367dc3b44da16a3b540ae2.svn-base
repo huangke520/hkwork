@@ -1,0 +1,270 @@
+<?php
+
+namespace app\api\controller;
+
+use app\api\model\ydxq\Signin as SigninModel;
+use app\api\model\ydxq\BbBaseCoupon as BbBaseCouponModel;
+use app\api\model\ydxq\ShopMemberCoupon as ShopMemberCouponModel;
+use app\api\model\ydxq\MemberGoldList as MemberGoldListModel;
+use app\api\model\ydxq\MemberGoldCount as MemberGoldCountModel;
+
+class Signin extends BaseController {
+
+    private $signin_model;
+    private $member_coupon_model;
+    private $member_gold_list_model;
+    private $member_gold_count_model;
+
+    private $week_data = [1 => '周一', 2 => '周二', 3 => '周三', 4 => '周四', 5 => '周五', 6 => '周六', 7 => '周日'];
+    private $sign_gold = 100;//签到领取的金币
+
+    public function __construct() {
+        parent::__construct();
+        $this->signin_model = new SigninModel();
+        $this->member_coupon_model = new ShopMemberCouponModel();
+        $this->member_gold_list_model = new MemberGoldListModel();
+        $this->member_gold_count_model = new MemberGoldCountModel();
+    }
+
+    //获取用户本周签到记录表
+    public function week_signin_recode(){
+        $param = $this->request_param;
+
+        $time = time();
+
+        if(!isset($param['openid']) || empty($openid = $param['openid'])){
+            return sdk_return('', 0, '缺少参数openid');
+        }
+
+        //获取当前用户本周的签到记录
+        $week_time = $this->getMondayAndSundayTime($time);
+
+        $where = [
+            ['openid', '=', $openid],
+            ['createtime', 'between', [$week_time['monday'], $week_time['sunday']]],
+        ];
+
+        $sings = $this->signin_model->getAllList($where);
+        $sings_tmp = [];
+        foreach ($sings as $k => $v){
+            $sings_tmp[ $v['week_day'] ] = $v;
+        }
+
+        $sings_lists = [];
+        $draw_day_num = 0;//签到的天数
+        $coupon_draw = 0;//领取状态 0不可领取  1待领取  2已领取
+        for ($i=1;$i<=7;$i++ ){
+            $data = [
+                'week'      =>  $this->week_data[$i],
+                'gold'      =>  $this->sign_gold,//领取金币数量
+                'is_draw'   =>  0,//当日是否已领取
+            ];
+
+            if(isset($sings_tmp[$i])){
+                $data['is_draw'] = 1;
+                $draw_day_num++;
+            }
+
+            $sings_lists[] = $data;
+        }
+
+        //获取本周的签到领取的优惠券信息
+        $coupon_info = $this->getSigninCoupon();
+        if(empty($coupon_info)){
+            return sdk_return('', 0, '获取优惠券待领取信息错误');
+        }
+
+        //如果签到天数大于等于5天
+        if($draw_day_num >= 5){
+            //获取当前用户本周是否已经领取优惠券
+            $member_coupon_where = [
+                ['coupon_id', '=', $coupon_info['id']],
+                ['openid', '=', $openid],
+                ['create_time', 'between', [$week_time['monday'], $week_time['sunday']]],
+            ];
+            $member_coupon_info = $this->member_coupon_model->getInfo($member_coupon_where);
+            if(empty($member_coupon_info)){
+                $coupon_draw = 1;// 1待领取
+            }else{
+                $coupon_draw = 2;// 2已领取
+            }
+        }
+
+        $return_data = [
+            'content'       =>  "已签到{$draw_day_num}天",
+            'coupon_msg'    =>  "每周满5天签到额外获赠{$coupon_info['money_value']}元优惠券1张",
+            'coupon_draw'   =>  $coupon_draw,//优惠券领取状态 0不可领取  1待领取  2已领取
+            'lists'         =>  $sings_lists,
+        ];
+
+        return sdk_return($return_data, 1, '请求成功');
+    }
+
+
+
+    //领取签到优惠券
+    public function draw_coupon(){
+        $param = $this->request_param;
+
+        if(!isset($param['openid']) || empty($openid = $param['openid'])){
+            return sdk_return('', 0, '缺少参数openid');
+        }
+
+        $time = time();
+
+        $week_time = $this->getMondayAndSundayTime($time);
+
+        //判断当前用户本周是否已经领取过优惠券
+        $coupon_info = $this->getSigninCoupon();
+
+        //获取当前用户本周是否已经领取优惠券
+        $member_coupon_where = [
+            ['coupon_id', '=', $coupon_info['id']],
+            ['openid', '=', $openid],
+            ['create_time', 'between', [$week_time['monday'], $week_time['sunday']]],
+        ];
+
+        $count = $this->member_coupon_model->getCount($member_coupon_where);
+        if($count){
+            return sdk_return('', 0, '用户已领取优惠券，请勿重复领取');
+        }
+
+        //验证当前用户是否具备领取条件
+        $sign_where = [
+            ['openid', '=', $openid],
+            ['createtime', 'between', [$week_time['monday'], $week_time['sunday']]],
+        ];
+        $signin_daynum = $this->signin_model->getCount($sign_where);
+        if($signin_daynum < 5){
+            return sdk_return('', 0, '签到天数不满足领取条件');
+        }
+
+        $time_end = strtotime(date('Y-m-d', $time)) + $coupon_info['valid_day'] * 60 * 60 * 24;
+
+        $member_coupon_data = [
+            'coupon_id'     =>  $coupon_info['id'],
+            'openid'        =>  $openid,
+            'openid_time'   =>  $time,
+            'time_start'    =>  $time,
+            'time_end'      =>  $time_end,
+            'create_time'   =>  $time,
+            'coupon_status' =>  2,
+            'status'        =>  1
+        ];
+        $id = $this->member_coupon_model->insertInfo($member_coupon_data);
+
+        $return_data = [
+            'coupon_id'     =>  $id,
+            'name'          =>  '全品类通用优惠券',
+            'endtime'       =>  date('Y-m-d', $time_end),
+            'limit_money'   =>  $coupon_info['limit_money'],
+            'money_value'   =>  $coupon_info['money_value']
+        ];
+
+        return sdk_return($return_data, 1, '领取成功');
+    }
+
+    //签到
+    public function signin(){
+        $param = $this->request_param;
+        if(!isset($param['openid']) || empty($openid = $param['openid'])){
+            return sdk_return('', 0, '参数openid错误');
+        }
+
+        //云店门店
+        $sup_id = isset($param['sup_id']) ? intval($param['sup_id']) : 461;
+
+        $time = time();
+
+        $start_time = strtotime(date('Y-m-d', $time));//凌晨时间
+
+        //获取今日是否已签到
+        $where = [
+            ['openid', '=', $openid],
+            ['create_time', '>', $start_time]
+        ];
+
+        $sign_count = $this->member_coupon_model->getCount($where);
+        if($sign_count){
+            return sdk_return('', 200, '今日已签到，请勿重复签到');
+        }
+
+        //增加签到记录
+        $sign_data = [
+            'openid'        =>  $openid,
+            'gold'          =>  $this->sign_gold,//签到的金币数量
+            'nature_week'   =>  date('Y').date('W'),//（年）自然周
+            'week_day'      =>  date('w'),
+            'createtime'    =>  $time
+        ];
+        $this->signin_model->insertInfo($sign_data);
+
+        $shop_member_model = new \app\api\model\ydxq\ShopMember();
+        $member_info = $shop_member_model->getInfoPro([['openid', '=', $openid]], ['unionid']);
+        $unionid = $member_info['unionid'];
+
+        //为当前用户增加金币领取记录
+        $golad_list_data = [
+            'type1'         =>  5,
+            'type2'         =>  4,
+            'openid'        =>  $openid,
+            'unionid'       =>  $unionid,
+            'sup_id'        =>  $sup_id,
+            'gold_value'    =>  $this->sign_gold,
+            'status'        =>  1,
+            'addtime'       =>  $time,
+            'modtime'       =>  $time
+        ];
+        $this->member_gold_list_model->insertInfo($golad_list_data);
+
+        //增加用户金币总量
+        $gold_count_info = $this->member_gold_count_model->getInfo([['sup_id', '=', $sup_id], ['openid', '=', $openid]]);
+        if(empty($gold_count_info)){
+            $gold_count_data = [
+                'sup_id'        =>  $sup_id,
+                'unionid'       =>  $unionid,
+                'openid'        =>  $openid,
+                'gold_count'    =>  $this->sign_gold,
+                'addtime'       =>  $time,
+                'modtime'       =>  $time
+            ];
+            $this->member_gold_count_model->insertInfo($gold_count_data);
+        }else{
+            $gold_count = $gold_count_info['gold_count'] + $this->sign_gold;
+            $this->member_gold_count_model->updateInfo([['id', '=', $gold_count_info['id']]], ['gold_count'=>$gold_count]);
+        }
+
+        $week_time = $this->getMondayAndSundayTime();
+        $sign_where = [
+            ['openid', '=', $openid],
+            ['createtime', 'between', [$week_time['monday'], $week_time['sunday']]],
+        ];
+        $signin_daynum = $this->signin_model->getCount($sign_where);
+
+        $content = $signin_daynum >= 5 ? '本周已签到5天，有待领取优惠券一张' : '';
+
+        return sdk_return(['content'=>$content], 1, '签到成功');
+
+    }
+
+    //获取签到优惠券
+    public function getSigninCoupon(){
+        //获取优惠券信息
+        $bb_base_coupon_model = new BbBaseCouponModel();
+        $coupon_info = $bb_base_coupon_model->getInfo([['status', '=', 1],['c_type', '=', 8]]);
+        return $coupon_info;
+    }
+
+    //获取当前时间所在周 周一和周天的时间戳
+    public function getMondayAndSundayTime($time = 0){
+        $time = empty($time) ? time() : $time;
+        //获取周一的时间
+        $monday = $time - ((date('w', $time) == 0 ? 7 : date('w', $time)) - 1) * 24 * 3600;//当前时间的周一时间戳
+        $sunday_times = $time + (7 - (date('w', $time) == 0 ? 7 : date('w', $time))) * 24 * 3600;//当前订单时间所在周周天时间戳
+        $sunday = strtotime('+1 day', strtotime(date('Y-m-d', $sunday_times)));
+        return [
+            'monday'        =>  strtotime(date('Y-m-d', $monday)),
+            'sunday'        =>  $sunday
+        ];
+    }
+}

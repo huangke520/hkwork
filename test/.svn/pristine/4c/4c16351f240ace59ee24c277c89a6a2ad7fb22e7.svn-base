@@ -1,0 +1,89 @@
+<?php
+class GoodsTotalQueryRequest
+{
+	/** 
+	 * 本地商品id   erp商品编号
+	 **/
+	private $prd_no;
+
+    /**
+     * 页码
+     **/
+    private $page_index;
+
+    /**
+     * 每页最大数量
+     **/
+    private $page_size;
+
+	private $apiParas = array();
+
+	public function setPrdNo($prd_no){
+	    $this->prd_no = $prd_no;
+        $this->apiParas["prd_no"] = $prd_no;
+    }
+
+	public function getPrdNo()
+	{
+		return $this->prd_no;
+	}
+	
+	public function setPrdNos($prd_nos){
+	    $this->prd_nos = $prd_nos;
+        $this->apiParas["prd_nos"] = $prd_nos;
+    }
+
+	public function getPrdNos()
+	{
+		return $this->prd_nos;
+	}
+	
+	public function setSkuNo($sku_no){
+	    $this->sku_no = $sku_no;
+        $this->apiParas["sku_no"] = $sku_no;
+    }
+
+	public function getSkuNo()
+	{
+		return $this->sku_no;
+	}
+
+	public function getApiMethodName()
+	{
+		return "inventory.query";
+	}
+
+    public function getApiParas()
+    {
+        return $this->apiParas;
+    }
+
+    public function setPageIndex($page_index)
+    {
+        $this->page_index = $page_index;
+        $this->apiParas["page_index"] = $page_index;
+    }
+
+    public function getPageIndex()
+    {
+        return $this->page_index;
+    }
+
+    public function setPageSize($page_size)
+    {
+        $this->page_size = $page_size;
+        $this->apiParas["page_size"] = $page_size;
+    }
+
+    public function getPageSize()
+    {
+        return $this->page_size;
+    }
+
+    public function check()
+    {
+        RequestCheckUtil::checkNotNull($this->modify_begin,"modify_begin");
+        RequestCheckUtil::checkNotNull($this->page_index,"page_index");
+        RequestCheckUtil::checkNotNull($this->page_size,"page_size");
+    }
+}
