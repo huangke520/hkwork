@@ -34,6 +34,7 @@ class Supplier extends BaseController {
 
     public function __construct() {
         parent::__construct();
+        //111
         $this->m_SupplierModel = new SupplierModel();
     }
 
